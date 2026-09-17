@@ -1,0 +1,1304 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OMIT 互動課堂 - 免登入即時課堂互動平台</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Canvas Confetti -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Noto Sans TC', -apple-system, BlinkMacSystemFont, sans-serif;
+            touch-action: manipulation;
+        }
+        .canvas-container {
+            touch-action: none;
+        }
+        /* Custom scrollbars */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 9999px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 antialiased min-h-screen">
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot, collection, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase Configuration provided
+        const firebaseConfig = {
+            apiKey: "AIzaSyAcphRXxqs_MTeWwffVVOFsnb8Liro5Lto",
+            authDomain: "omit-8c173.firebaseapp.com",
+            projectId: "omit-8c173",
+            storageBucket: "omit-8c173.firebasestorage.app",
+            messagingSenderId: "1078509757779",
+            appId: "1:1078509757779:web:64fe9465920eca4f38ada6"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        // Expose to window for React components
+        window.firebaseDB = db;
+        window.firebaseAuth = auth;
+        window.firebaseFS = { doc, setDoc, getDoc, updateDoc, onSnapshot, collection, query };
+
+        // Perform anonymous sign in
+        signInAnonymously(auth).catch(err => console.error("Firebase Auth Error:", err));
+    </script>
+
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        // Custom Toast Notification
+        const Toast = ({ message, type, onClose }) => {
+            useEffect(() => {
+                const timer = setTimeout(onClose, 3000);
+                return () => clearTimeout(timer);
+            }, [onClose]);
+
+            const bgColor = type === 'error' ? 'bg-red-500' : type === 'success' ? 'bg-emerald-500' : 'bg-indigo-600';
+
+            return (
+                <div class={`fixed top-4 right-4 z-50 ${bgColor} text-white px-5 py-3 rounded-xl shadow-2xl flex items-center space-x-2 text-sm font-medium transition-all transform animate-bounce`}>
+                    <span>{message}</span>
+                </div>
+            );
+        };
+
+        // Custom SVG Icons
+        const IconUserGroup = () => (
+            <svg class="w-5 h-5 inline-block mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+            </svg>
+        );
+
+        const IconTrophy = () => (
+            <svg class="w-5 h-5 inline-block mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2 0h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/>
+            </svg>
+        );
+
+        const IconUpload = () => (
+            <svg class="w-5 h-5 inline-block mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+            </svg>
+        );
+
+        function OMITApp() {
+            // Role & Session State
+            const [role, setRole] = useState('LANDING'); // 'LANDING', 'TEACHER', 'STUDENT'
+            const [roomCode, setRoomCode] = useState('');
+            const [studentName, setStudentName] = useState('');
+            const [toast, setToast] = useState(null);
+
+            // Shared Question & Room State
+            const [activeQuestion, setActiveQuestion] = useState(null);
+            const [studentsList, setStudentsList] = useState([]);
+            const [responses, setResponses] = useState({}); // { studentId: { answer, timestamp, duration, name } }
+            
+            // BroadcastChannel instance for real-time inter-tab sync
+            const bcRef = useRef(null);
+            const myStudentId = useRef('std_' + Math.random().toString(36).substring(2, 9));
+
+            // Helper to show toasts
+            const showToast = (message, type = 'info') => {
+                setToast({ message, type });
+            };
+
+            // Parse URL parameters for direct room joining via QR Code
+            useEffect(() => {
+                const params = new URLSearchParams(window.location.search);
+                const roomParam = params.get('room');
+                if (roomParam) {
+                    setRoomCode(roomParam.toUpperCase());
+                }
+            }, []);
+
+            // Setup Firestore Sync & BroadcastChannel fallback
+            useEffect(() => {
+                if (!roomCode) return;
+
+                const code = roomCode.toUpperCase();
+                const appId = 'omit-8c173';
+                const channelName = `omit_room_${code}`;
+                const bc = new BroadcastChannel(channelName);
+                bcRef.current = bc;
+
+                // Setup Firestore Realtime Listener
+                let unsubscribe = null;
+                const checkFirebaseReady = setInterval(() => {
+                    if (window.firebaseDB && window.firebaseFS) {
+                        clearInterval(checkFirebaseReady);
+                        const { doc, onSnapshot } = window.firebaseFS;
+                        // RULE 1 Path compliance
+                        const roomDocRef = doc(window.firebaseDB, 'artifacts', appId, 'public', 'data', 'rooms', code);
+                        
+                        unsubscribe = onSnapshot(roomDocRef, (snapshot) => {
+                            if (snapshot.exists()) {
+                                const data = snapshot.data();
+                                if (data.activeQuestion !== undefined) {
+                                    setActiveQuestion(data.activeQuestion);
+                                }
+                                if (data.responses) {
+                                    setResponses(data.responses);
+                                }
+                                if (data.studentsList) {
+                                    setStudentsList(data.studentsList);
+                                }
+                            }
+                        }, (err) => {
+                            console.warn("Firestore sync error, falling back to BroadcastChannel:", err);
+                        });
+                    }
+                }, 200);
+
+                // BroadcastChannel event listener
+                bc.onmessage = (event) => {
+                    const { type, data } = event.data;
+                    
+                    if (type === 'SYNC_STATE_REQUEST' && role === 'TEACHER') {
+                        bc.postMessage({
+                            type: 'SYNC_STATE_RESPONSE',
+                            data: { activeQuestion, responses, studentsList }
+                        });
+                    } else if (type === 'SYNC_STATE_RESPONSE' && role === 'STUDENT') {
+                        if (data.activeQuestion) setActiveQuestion(data.activeQuestion);
+                        if (data.studentsList) setStudentsList(data.studentsList);
+                    } else if (type === 'NEW_QUESTION') {
+                        setActiveQuestion(data);
+                    } else if (type === 'CLEAR_QUESTION') {
+                        setActiveQuestion(null);
+                    } else if (type === 'STUDENT_SUBMIT') {
+                        if (role === 'TEACHER') {
+                            setResponses(prev => ({ ...prev, [data.studentId]: data }));
+                        }
+                    } else if (type === 'STUDENT_JOIN') {
+                        if (role === 'TEACHER') {
+                            setStudentsList(prev => {
+                                if (!prev.some(s => s.id === data.studentId)) {
+                                    return [...prev, data];
+                                }
+                                return prev;
+                            });
+                        }
+                    }
+                };
+
+                // Request initial sync if student
+                if (role === 'STUDENT') {
+                    const joinData = { 
+                        studentId: myStudentId.current, 
+                        name: studentName, 
+                        joinedAt: new Date().toLocaleTimeString('zh-HK') 
+                    };
+                    bc.postMessage({ type: 'STUDENT_JOIN', data: joinData });
+                    bc.postMessage({ type: 'SYNC_STATE_REQUEST' });
+
+                    // Also sync to Firestore directly if possible
+                    setTimeout(() => {
+                        if (window.firebaseDB && window.firebaseFS) {
+                            const { doc, getDoc, setDoc } = window.firebaseFS;
+                            const roomDocRef = doc(window.firebaseDB, 'artifacts', appId, 'public', 'data', 'rooms', code);
+                            getDoc(roomDocRef).then((snap) => {
+                                const currentData = snap.exists() ? snap.data() : {};
+                                const currentStudents = currentData.studentsList || [];
+                                if (!currentStudents.some(s => s.id === joinData.studentId)) {
+                                    setDoc(roomDocRef, {
+                                        ...currentData,
+                                        studentsList: [...currentStudents, joinData]
+                                    }, { merge: true });
+                                }
+                            }).catch(e => console.error(e));
+                        }
+                    }, 500);
+                }
+
+                return () => {
+                    clearInterval(checkFirebaseReady);
+                    if (unsubscribe) unsubscribe();
+                    bc.close();
+                };
+            }, [roomCode, role]);
+
+            // Create Room (Teacher)
+            const handleCreateRoom = () => {
+                const generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
+                setRoomCode(generatedCode);
+                setRole('TEACHER');
+
+                // Initialize Firestore Room Document
+                if (window.firebaseDB && window.firebaseFS) {
+                    const { doc, setDoc } = window.firebaseFS;
+                    const roomDocRef = doc(window.firebaseDB, 'artifacts', 'omit-8c173', 'public', 'data', 'rooms', generatedCode);
+                    setDoc(roomDocRef, {
+                        createdAt: Date.now(),
+                        activeQuestion: null,
+                        responses: {},
+                        studentsList: []
+                    }, { merge: true }).catch(err => console.error(err));
+                }
+
+                showToast(`已建立互動課堂 房號：${generatedCode}`, 'success');
+            };
+
+            // Join Room (Student)
+            const handleJoinRoom = (e) => {
+                e?.preventDefault();
+                if (!roomCode.trim() || roomCode.length !== 6) {
+                    showToast('請輸入6位數字房號', 'error');
+                    return;
+                }
+                if (!studentName.trim()) {
+                    showToast('請輸入您的姓名或暱稱', 'error');
+                    return;
+                }
+                setRole('STUDENT');
+                showToast(`已進入房號 ${roomCode} 的課堂`, 'success');
+            };
+
+            // Render Views based on Role
+            if (role === 'LANDING') {
+                return (
+                    <div class="min-h-screen bg-gradient-to-br from-indigo-900 via-indigo-800 to-purple-900 flex items-center justify-center p-4">
+                        {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+                        
+                        <div class="max-w-md w-full bg-white rounded-3xl shadow-2xl p-8 space-y-8 relative overflow-hidden">
+                            <div class="text-center space-y-2">
+                                <div class="inline-flex items-center justify-center w-16 h-16 bg-indigo-100 text-indigo-600 rounded-2xl mb-2 font-black text-2xl shadow-inner">
+                                    OMIT
+                                </div>
+                                <h1 class="text-3xl font-extrabold text-slate-800 tracking-tight">OMIT 互動課堂</h1>
+                                <p class="text-slate-500 text-sm">免登入！隨查隨答、高效即時的反饋互動平台</p>
+                            </div>
+
+                            <div class="space-y-6">
+                                {/* Student Join Section */}
+                                <form onSubmit={handleJoinRoom} class="bg-indigo-50/70 p-5 rounded-2xl border border-indigo-100 space-y-4">
+                                    <h2 class="text-xs font-bold text-indigo-600 uppercase tracking-wider">我是學生 (加入課堂)</h2>
+                                    <div>
+                                        <input 
+                                            type="text" 
+                                            placeholder="請輸入房號 (例如 123456)" 
+                                            value={roomCode} 
+                                            onChange={(e) => setRoomCode(e.target.value.replace(/[^0-9]/g, ''))}
+                                            class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white font-mono text-center tracking-widest text-lg font-bold"
+                                            maxLength={6}
+                                        />
+                                    </div>
+                                    <div>
+                                        <input 
+                                            type="text" 
+                                            placeholder="請輸入你的姓名 / 暱稱" 
+                                            value={studentName} 
+                                            onChange={(e) => setStudentName(e.target.value)}
+                                            class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white font-medium"
+                                        />
+                                    </div>
+                                    <button 
+                                        type="submit" 
+                                        class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-xl transition shadow-lg shadow-indigo-200 active:scale-95"
+                                    >
+                                        進入課堂 🚀
+                                    </button>
+                                </form>
+
+                                <div class="relative flex py-1 items-center">
+                                    <div class="flex-grow border-t border-slate-200"></div>
+                                    <span class="flex-shrink mx-4 text-slate-400 text-xs font-medium">或</span>
+                                    <div class="flex-grow border-t border-slate-200"></div>
+                                </div>
+
+                                {/* Teacher Create Section */}
+                                <div class="text-center">
+                                    <button 
+                                        onClick={handleCreateRoom}
+                                        class="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3.5 rounded-xl transition shadow-md flex items-center justify-center space-x-2 active:scale-95"
+                                    >
+                                        <span>👨‍🏫 開啟新課堂 (教師控制台)</span>
+                                    </button>
+                                    <p class="text-xs text-slate-400 mt-2">不需註冊或登入，建立即可發放房號與 QR Code</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (role === 'TEACHER') {
+                return (
+                    <TeacherDashboard 
+                        roomCode={roomCode} 
+                        activeQuestion={activeQuestion} 
+                        setActiveQuestion={setActiveQuestion}
+                        responses={responses}
+                        setResponses={setResponses}
+                        studentsList={studentsList}
+                        setStudentsList={setStudentsList}
+                        bcRef={bcRef}
+                        showToast={showToast}
+                        onExit={() => setRole('LANDING')}
+                    />
+                );
+            }
+
+            if (role === 'STUDENT') {
+                return (
+                    <StudentInterface 
+                        roomCode={roomCode}
+                        studentName={studentName}
+                        studentId={myStudentId.current}
+                        activeQuestion={activeQuestion}
+                        bcRef={bcRef}
+                        showToast={showToast}
+                        onExit={() => setRole('LANDING')}
+                    />
+                );
+            }
+
+            return null;
+        }
+
+        function TeacherDashboard({ roomCode, activeQuestion, setActiveQuestion, responses, setResponses, studentsList, setStudentsList, bcRef, showToast, onExit }) {
+            const [selectedMode, setSelectedMode] = useState('CHOICE'); // 'CHOICE', 'TF', 'SHORT', 'DRAW'
+            const [questionText, setQuestionText] = useState('');
+            const [allowStudentEdit, setAllowStudentEdit] = useState(true); // Feature 3: Allow response modification
+            const [bgImage, setBgImage] = useState(null); // Feature 2: Custom whiteboard background image
+            const [choiceCount, setChoiceCount] = useState(4); // 4 or 5 options
+            const [showQRModal, setShowQRModal] = useState(false);
+            const [showStudentListModal, setShowStudentListModal] = useState(false); // Feature 1: Student List Modal
+            const [viewTab, setViewTab] = useState('ANALYTICS'); // 'ANALYTICS', 'LEADERBOARD', 'GALLERY'
+
+            const joinUrl = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
+            const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(joinUrl)}`;
+
+            // Helper default text prompt
+            const getDefaultPrompt = (mode) => {
+                switch(mode) {
+                    case 'CHOICE': return '請選擇正確答案：';
+                    case 'TF': return '請判斷以下敘述是否正確：';
+                    case 'SHORT': return '請寫出你的觀點或解題過程：';
+                    case 'DRAW': return '請在白板上作圖繪製解答：';
+                    default: return '';
+                }
+            };
+
+            // Image Upload Handler for Background
+            const handleImageUpload = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    if (file.size > 3 * 1024 * 1024) {
+                        showToast('圖片大小不能超過 3MB', 'error');
+                        return;
+                    }
+                    const reader = new FileReader();
+                    reader.onload = (uploadEvent) => {
+                        setBgImage(uploadEvent.target.result);
+                        showToast('背景圖片已上傳', 'success');
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            // Publish Question Function
+            const handlePublishQuestion = () => {
+                const newQ = {
+                    id: 'q_' + Date.now(),
+                    mode: selectedMode,
+                    text: questionText.trim() || getDefaultPrompt(selectedMode),
+                    startTime: Date.now(),
+                    allowStudentEdit: allowStudentEdit, // Feature 3
+                    bgImage: bgImage, // Feature 2
+                    choiceOptions: selectedMode === 'CHOICE' ? (choiceCount === 4 ? ['A', 'B', 'C', 'D'] : ['A', 'B', 'C', 'D', 'E']) : []
+                };
+
+                setActiveQuestion(newQ);
+                setResponses({}); // Reset current question responses
+
+                // Sync to Firestore & BroadcastChannel
+                if (window.firebaseDB && window.firebaseFS) {
+                    const { doc, setDoc } = window.firebaseFS;
+                    const roomDocRef = doc(window.firebaseDB, 'artifacts', 'omit-8c173', 'public', 'data', 'rooms', roomCode);
+                    setDoc(roomDocRef, {
+                        activeQuestion: newQ,
+                        responses: {}
+                    }, { merge: true }).catch(err => console.error(err));
+                }
+
+                if (bcRef.current) {
+                    bcRef.current.postMessage({ type: 'NEW_QUESTION', data: newQ });
+                }
+
+                showToast('已發佈題目給全班學生！', 'success');
+            };
+
+            // Clear/End Active Question
+            const handleClearQuestion = () => {
+                setActiveQuestion(null);
+                if (window.firebaseDB && window.firebaseFS) {
+                    const { doc, setDoc } = window.firebaseFS;
+                    const roomDocRef = doc(window.firebaseDB, 'artifacts', 'omit-8c173', 'public', 'data', 'rooms', roomCode);
+                    setDoc(roomDocRef, { activeQuestion: null }, { merge: true }).catch(err => console.error(err));
+                }
+                if (bcRef.current) {
+                    bcRef.current.postMessage({ type: 'CLEAR_QUESTION' });
+                }
+                showToast('已結束當前題目', 'info');
+            };
+
+            // Simulate Responses for demo testing
+            const handleSimulate = () => {
+                if (!activeQuestion) return;
+                const sampleStudents = [
+                    { id: 'sim_1', name: '張小明' },
+                    { id: 'sim_2', name: '李美麗' },
+                    { id: 'sim_3', name: '王大同' },
+                    { id: 'sim_4', name: '陳思婷' },
+                    { id: 'sim_5', name: '黃志豪' }
+                ];
+
+                const updated = { ...responses };
+                sampleStudents.forEach((st, idx) => {
+                    const duration = (Math.random() * 6 + 1.2).toFixed(1);
+                    let ans = '';
+                    if (activeQuestion.mode === 'CHOICE') {
+                        ans = activeQuestion.choiceOptions[Math.floor(Math.random() * activeQuestion.choiceOptions.length)];
+                    } else if (activeQuestion.mode === 'TF') {
+                        ans = Math.random() > 0.5 ? 'O' : 'X';
+                    } else if (activeQuestion.mode === 'SHORT') {
+                        ans = '光合作用產生的主要產物是葡萄糖與氧氣。';
+                    } else {
+                        ans = 'CANVAS_DRAWING_SIMULATED';
+                    }
+
+                    updated[st.id] = {
+                        studentId: st.id,
+                        name: st.name,
+                        answer: ans,
+                        duration: duration,
+                        timestamp: new Date().toLocaleTimeString('zh-HK')
+                    };
+                });
+
+                setResponses(updated);
+
+                if (window.firebaseDB && window.firebaseFS) {
+                    const { doc, setDoc } = window.firebaseFS;
+                    const roomDocRef = doc(window.firebaseDB, 'artifacts', 'omit-8c173', 'public', 'data', 'rooms', roomCode);
+                    setDoc(roomDocRef, { responses: updated }, { merge: true }).catch(err => console.error(err));
+                }
+
+                showToast('已快速模擬 5 位學生提交回應', 'success');
+            };
+
+            // Feature 4: Compute Leaderboard Data (Sorted by duration)
+            const leaderboardList = useMemo(() => {
+                return Object.values(responses)
+                    .filter(r => r && r.duration !== undefined)
+                    .sort((a, b) => parseFloat(a.duration) - parseFloat(b.duration));
+            }, [responses]);
+
+            const responseCount = Object.keys(responses).length;
+
+            return (
+                <div class="min-h-screen bg-slate-50 flex flex-col">
+                    {/* Top Bar */}
+                    <header class="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-30 shadow-sm flex items-center justify-between">
+                        <div class="flex items-center space-x-4">
+                            <span class="font-black text-2xl text-indigo-600 tracking-tight">OMIT</span>
+                            <span class="text-xs bg-indigo-50 text-indigo-700 font-bold px-3 py-1.5 rounded-lg border border-indigo-200">
+                                教師控制台
+                            </span>
+                            <div class="flex items-center space-x-2 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
+                                <span class="text-xs font-bold text-slate-500 uppercase">房號</span>
+                                <span class="font-mono text-lg font-black text-slate-800 tracking-wider">{roomCode}</span>
+                                <button 
+                                    onClick={() => setShowQRModal(true)}
+                                    class="text-xs text-indigo-600 hover:text-indigo-800 font-bold underline ml-1"
+                                >
+                                    展示 QR Code
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Feature 1: Real-time Student Count Badge */}
+                        <div class="flex items-center space-x-3">
+                            <button 
+                                onClick={() => setShowStudentListModal(true)}
+                                class="flex items-center space-x-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 font-bold px-4 py-2 rounded-xl transition shadow-sm active:scale-95"
+                            >
+                                <span class="relative flex h-3 w-3">
+                                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                    <span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                                </span>
+                                <IconUserGroup />
+                                <span>已加入學生：{studentsList.length} 人</span>
+                            </button>
+
+                            <button 
+                                onClick={onExit}
+                                class="text-slate-400 hover:text-slate-600 font-medium text-sm px-3 py-2 rounded-lg hover:bg-slate-100 transition"
+                            >
+                                離開課堂
+                            </button>
+                        </div>
+                    </header>
+
+                    {/* Main Content Area */}
+                    <div class="flex-1 max-w-7xl w-full mx-auto p-6 grid grid-cols-1 lg:grid-cols-12 gap-8">
+                        {/* Question Control Panel */}
+                        <div class="lg:col-span-5 space-y-6">
+                            <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-6">
+                                <h2 class="text-lg font-bold text-slate-800 flex items-center justify-between">
+                                    <span>📢 發佈新互動題目</span>
+                                    {activeQuestion && (
+                                        <span class="text-xs font-bold bg-amber-100 text-amber-800 px-2.5 py-1 rounded-full animate-pulse">
+                                            進行中
+                                        </span>
+                                    )}
+                                </h2>
+
+                                {/* Question Mode Selector */}
+                                <div class="grid grid-cols-2 gap-2">
+                                    {[
+                                        { id: 'CHOICE', label: '🔘 單項選擇題' },
+                                        { id: 'TF', label: '⚖️ 是非判斷題' },
+                                        { id: 'SHORT', label: '📝 文字簡答題' },
+                                        { id: 'DRAW', label: '🎨 互動白板/繪圖' }
+                                    ].map(mode => (
+                                        <button
+                                            key={mode.id}
+                                            onClick={() => setSelectedMode(mode.id)}
+                                            class={`p-3 rounded-2xl text-xs font-bold text-left transition border ${
+                                                selectedMode === mode.id 
+                                                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-100' 
+                                                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                                            }`}
+                                        >
+                                            {mode.label}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {/* Question Prompt Input */}
+                                <div class="space-y-2">
+                                    <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">題目內容 / 指引</label>
+                                    <textarea
+                                        rows={3}
+                                        placeholder={getDefaultPrompt(selectedMode)}
+                                        value={questionText}
+                                        onChange={(e) => setQuestionText(e.target.value)}
+                                        class="w-full p-3.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-slate-50 font-medium"
+                                    />
+                                </div>
+
+                                {/* Mode Specific Options */}
+                                {selectedMode === 'CHOICE' && (
+                                    <div class="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-200">
+                                        <span class="text-xs font-bold text-slate-600">選項數量</span>
+                                        <div class="flex space-x-2">
+                                            <button 
+                                                onClick={() => setChoiceCount(4)}
+                                                class={`px-3 py-1 rounded-lg text-xs font-bold ${choiceCount === 4 ? 'bg-indigo-600 text-white' : 'bg-white border text-slate-600'}`}
+                                            >
+                                                4 項 (A-D)
+                                            </button>
+                                            <button 
+                                                onClick={() => setChoiceCount(5)}
+                                                class={`px-3 py-1 rounded-lg text-xs font-bold ${choiceCount === 5 ? 'bg-indigo-600 text-white' : 'bg-white border text-slate-600'}`}
+                                            >
+                                                5 項 (A-E)
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Feature 2: Teacher Background Image Uploader */}
+                                <div class="space-y-2">
+                                    <label class="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
+                                        <span>🖼️ 自訂題目 / 白板背景圖片</span>
+                                        {bgImage && <span class="text-emerald-600 font-normal">已套用圖片</span>}
+                                    </label>
+                                    <div class="relative border-2 border-dashed border-slate-200 hover:border-indigo-400 rounded-2xl p-4 text-center bg-slate-50/50 transition">
+                                        {bgImage ? (
+                                            <div class="relative space-y-2">
+                                                <img src={bgImage} alt="Background Preview" class="max-h-32 mx-auto rounded-xl object-contain border shadow-sm" />
+                                                <button 
+                                                    onClick={() => setBgImage(null)}
+                                                    class="text-xs text-red-500 font-bold hover:underline"
+                                                >
+                                                    移除背景圖片
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <label class="cursor-pointer space-y-1 block">
+                                                <IconUpload />
+                                                <p class="text-xs font-bold text-slate-600">點擊或拖曳上傳背景圖</p>
+                                                <p class="text-[10px] text-slate-400">學生繪圖/解題時將以此圖片為底圖 (PNG/JPG)</p>
+                                                <input type="file" accept="image/*" onChange={handleImageUpload} class="hidden" />
+                                            </label>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Feature 3: Allow Student Response Modification Toggle */}
+                                <div class="flex items-center justify-between bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                                    <div class="space-y-0.5">
+                                        <p class="text-xs font-bold text-slate-700">允許學生修改答案</p>
+                                        <p class="text-[10px] text-slate-400">開啟後學生提交後仍可重新修改及提交</p>
+                                    </div>
+                                    <button 
+                                        onClick={() => setAllowStudentEdit(!allowStudentEdit)}
+                                        class={`w-12 h-6 flex items-center rounded-full p-1 transition-colors duration-300 ${allowStudentEdit ? 'bg-indigo-600 justify-end' : 'bg-slate-300 justify-start'}`}
+                                    >
+                                        <span class="bg-white w-4 h-4 rounded-full shadow-md"></span>
+                                    </button>
+                                </div>
+
+                                {/* Publish Buttons */}
+                                <div class="space-y-3 pt-2">
+                                    <button
+                                        onClick={handlePublishQuestion}
+                                        class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-2xl transition shadow-lg shadow-indigo-100 flex items-center justify-center space-x-2 active:scale-95"
+                                    >
+                                        <span>🚀 發佈題目給學生</span>
+                                    </button>
+
+                                    {activeQuestion && (
+                                        <button
+                                            onClick={handleClearQuestion}
+                                            class="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-2.5 rounded-xl transition text-xs"
+                                        >
+                                            結束當前題目
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Student Submissions & Analytics Panel */}
+                        <div class="lg:col-span-7 space-y-6">
+                            <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-6">
+                                {/* Header & Tabs */}
+                                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                                    <div>
+                                        <h3 class="text-lg font-bold text-slate-800">即時答題動態與結果</h3>
+                                        <p class="text-xs text-slate-400">已收到 {responseCount} 份學生回應</p>
+                                    </div>
+
+                                    {/* Navigation Tabs */}
+                                    <div class="flex bg-slate-100 p-1 rounded-xl space-x-1">
+                                        <button 
+                                            onClick={() => setViewTab('ANALYTICS')}
+                                            class={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${viewTab === 'ANALYTICS' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                                        >
+                                            📊 即時統計
+                                        </button>
+                                        {/* Feature 4: Leaderboard Tab */}
+                                        <button 
+                                            onClick={() => setViewTab('LEADERBOARD')}
+                                            class={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center ${viewTab === 'LEADERBOARD' ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                                        >
+                                            <IconTrophy /> 答題龍虎榜
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {activeQuestion ? (
+                                    <>
+                                        {/* Active Question Display Banner */}
+                                        <div class="bg-indigo-50/70 p-4 rounded-2xl border border-indigo-100 space-y-2">
+                                            <div class="flex items-center justify-between text-xs font-bold text-indigo-600">
+                                                <span>當前發佈題目：{activeQuestion.mode}</span>
+                                                <span>{activeQuestion.allowStudentEdit ? '🔓 允許修改' : '🔒 不可修改'}</span>
+                                            </div>
+                                            <p class="font-bold text-slate-800">{activeQuestion.text}</p>
+                                            {activeQuestion.bgImage && (
+                                                <div class="text-xs text-slate-500 flex items-center space-x-1">
+                                                    <span>🖼️ 包含自訂背景圖</span>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* TAB 1: Analytics / Responses */}
+                                        {viewTab === 'ANALYTICS' && (
+                                            <div class="space-y-6">
+                                                {/* Choice / TF Chart */}
+                                                {(activeQuestion.mode === 'CHOICE' || activeQuestion.mode === 'TF') && (
+                                                    <div class="space-y-3">
+                                                        <h4 class="text-xs font-bold text-slate-500 uppercase">選項統計分佈</h4>
+                                                        {(activeQuestion.mode === 'CHOICE' ? activeQuestion.choiceOptions : ['O', 'X']).map(opt => {
+                                                            const count = Object.values(responses).filter(r => r.answer === opt).length;
+                                                            const pct = responseCount > 0 ? Math.round((count / responseCount) * 100) : 0;
+                                                            return (
+                                                                <div key={opt} class="space-y-1">
+                                                                    <div class="flex justify-between text-xs font-bold">
+                                                                        <span class="text-slate-700">選項 {opt}</span>
+                                                                        <span class="text-indigo-600">{count} 人 ({pct}%)</span>
+                                                                    </div>
+                                                                    <div class="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+                                                                        <div 
+                                                                            class="bg-indigo-600 h-3 rounded-full transition-all duration-500"
+                                                                            style={{ width: `${pct}%` }}
+                                                                        ></div>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+
+                                                {/* Short Answer / Canvas Work Gallery */}
+                                                <div class="space-y-3">
+                                                    <h4 class="text-xs font-bold text-slate-500 uppercase">學生個別回應 ({responseCount})</h4>
+                                                    {responseCount === 0 ? (
+                                                        <div class="text-center py-8 text-slate-400 text-sm">
+                                                            等待學生提交答案... ⏳
+                                                            <div class="mt-3">
+                                                                <button onClick={handleSimulate} class="text-xs text-indigo-600 underline font-bold">
+                                                                    (快速模擬學生答題測試)
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-96 overflow-y-auto p-1">
+                                                            {Object.values(responses).map((res) => (
+                                                                <div key={res.studentId} class="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                                                                    <div class="flex items-center justify-between text-xs">
+                                                                        <span class="font-bold text-slate-800">{res.name}</span>
+                                                                        <span class="text-slate-400 font-mono">{res.duration}s 秒提交</span>
+                                                                    </div>
+                                                                    
+                                                                    {activeQuestion.mode === 'DRAW' || res.answer.startsWith('data:image') ? (
+                                                                        <div class="border rounded-xl bg-white overflow-hidden">
+                                                                            <img src={res.answer} alt="Student Drawing" class="w-full h-32 object-contain" />
+                                                                        </div>
+                                                                    ) : (
+                                                                        <p class="text-sm text-slate-700 bg-white p-2.5 rounded-xl border font-medium">
+                                                                            {res.answer}
+                                                                        </p>
+                                                                    )}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* TAB 2: Feature 4: Leaderboard (答題龍虎榜) */}
+                                        {viewTab === 'LEADERBOARD' && (
+                                            <div class="space-y-4">
+                                                <div class="bg-gradient-to-r from-amber-500 to-amber-600 text-white p-4 rounded-2xl shadow-sm flex items-center justify-between">
+                                                    <div>
+                                                        <h4 class="font-black text-lg flex items-center">
+                                                            🏆 最快答題龍虎榜
+                                                        </h4>
+                                                        <p class="text-xs opacity-90">根據學生發佈題目後計算的答題花費時間排名</p>
+                                                    </div>
+                                                    <span class="text-2xl">⚡</span>
+                                                </div>
+
+                                                {leaderboardList.length === 0 ? (
+                                                    <div class="text-center py-10 text-slate-400 text-sm">
+                                                        尚無學生提交紀錄，無法生成榜單
+                                                    </div>
+                                                ) : (
+                                                    <div class="space-y-2 max-h-96 overflow-y-auto">
+                                                        {leaderboardList.map((item, rank) => {
+                                                            let rankBadge = `${rank + 1}`;
+                                                            let badgeBg = "bg-slate-200 text-slate-700";
+                                                            if (rank === 0) {
+                                                                rankBadge = "🥇 冠軍";
+                                                                badgeBg = "bg-amber-400 text-amber-950 font-black shadow-md";
+                                                            } else if (rank === 1) {
+                                                                rankBadge = "🥈 亞軍";
+                                                                badgeBg = "bg-slate-300 text-slate-900 font-bold";
+                                                            } else if (rank === 2) {
+                                                                rankBadge = "🥉 季軍";
+                                                                badgeBg = "bg-amber-700 text-white font-bold";
+                                                            }
+
+                                                            return (
+                                                                <div 
+                                                                    key={item.studentId}
+                                                                    class={`p-3.5 rounded-2xl border flex items-center justify-between transition ${
+                                                                        rank === 0 ? 'bg-amber-50/60 border-amber-200' : 'bg-white border-slate-200'
+                                                                    }`}
+                                                                >
+                                                                    <div class="flex items-center space-x-3">
+                                                                        <span class={`px-3 py-1 rounded-xl text-xs ${badgeBg}`}>
+                                                                            {rankBadge}
+                                                                        </span>
+                                                                        <span class="font-bold text-slate-800 text-sm">{item.name}</span>
+                                                                    </div>
+                                                                    <div class="text-right">
+                                                                        <span class="font-mono text-indigo-600 font-extrabold text-sm block">
+                                                                            {item.duration} 秒
+                                                                        </span>
+                                                                        <span class="text-[10px] text-slate-400">{item.timestamp}</span>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </>
+                                ) : (
+                                    <div class="text-center py-16 space-y-3">
+                                        <div class="text-4xl">💡</div>
+                                        <p class="text-slate-500 font-medium text-sm">教師尚未發佈題目，請從左側控制台發佈。</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* QR Code Modal */}
+                    {showQRModal && (
+                        <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                            <div class="bg-white rounded-3xl p-8 max-w-sm w-full text-center space-y-6 shadow-2xl animate-scale-up">
+                                <h3 class="text-xl font-black text-slate-800">學生掃描加入課堂</h3>
+                                <div class="bg-slate-50 p-4 rounded-2xl inline-block border">
+                                    <img src={qrImageUrl} alt="QR Code" class="w-56 h-56 mx-auto rounded-lg" />
+                                </div>
+                                <div>
+                                    <p class="text-xs text-slate-400">課堂房號</p>
+                                    <p class="text-3xl font-mono font-black text-indigo-600 tracking-wider">{roomCode}</p>
+                                </div>
+                                <button 
+                                    onClick={() => setShowQRModal(false)}
+                                    class="w-full bg-slate-800 text-white font-bold py-3 rounded-xl hover:bg-slate-900 transition"
+                                >
+                                    關閉
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Feature 1: Student List Modal (已加入學生名單) */}
+                    {showStudentListModal && (
+                        <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                            <div class="bg-white rounded-3xl p-6 max-w-md w-full space-y-5 shadow-2xl">
+                                <div class="flex items-center justify-between border-b pb-3">
+                                    <h3 class="text-lg font-bold text-slate-800 flex items-center">
+                                        <IconUserGroup /> 已加入學生名單 ({studentsList.length}人)
+                                    </h3>
+                                    <button 
+                                        onClick={() => setShowStudentListModal(false)}
+                                        class="text-slate-400 hover:text-slate-600 font-bold"
+                                    >
+                                        ✕
+                                    </button>
+                                </div>
+
+                                <div class="max-h-80 overflow-y-auto space-y-2">
+                                    {studentsList.length === 0 ? (
+                                        <p class="text-center py-8 text-slate-400 text-sm">尚無學生加入課堂</p>
+                                    ) : (
+                                        studentsList.map((st, i) => {
+                                            const hasAnswered = !!responses[st.id || st.studentId];
+                                            return (
+                                                <div key={i} class="flex items-center justify-between p-3 bg-slate-50 rounded-xl border">
+                                                    <div class="flex items-center space-x-3">
+                                                        <div class="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold text-xs">
+                                                            {i + 1}
+                                                        </div>
+                                                        <div>
+                                                            <p class="font-bold text-sm text-slate-800">{st.name}</p>
+                                                            <p class="text-[10px] text-slate-400">加入時間: {st.joinedAt || '剛剛'}</p>
+                                                        </div>
+                                                    </div>
+                                                    <span class={`text-xs px-2.5 py-1 rounded-full font-bold ${
+                                                        hasAnswered ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
+                                                    }`}>
+                                                        {hasAnswered ? '已作答' : '未作答'}
+                                                    </span>
+                                                </div>
+                                            );
+                                        })
+                                    )}
+                                </div>
+
+                                <button 
+                                    onClick={() => setShowStudentListModal(false)}
+                                    class="w-full bg-slate-100 text-slate-700 font-bold py-2.5 rounded-xl hover:bg-slate-200 transition text-sm"
+                                >
+                                    返回控制台
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function StudentInterface({ roomCode, studentName, studentId, activeQuestion, bcRef, showToast, onExit }) {
+            const [selectedAnswer, setSelectedAnswer] = useState('');
+            const [shortAnswer, setShortAnswer] = useState('');
+            const [submitted, setSubmitted] = useState(false);
+            const [isEditing, setIsEditing] = useState(false); // Feature 3 edit mode state
+            const [duration, setDuration] = useState(null);
+
+            // Reset student state when a new question arrives
+            useEffect(() => {
+                if (activeQuestion) {
+                    setSelectedAnswer('');
+                    setShortAnswer('');
+                    setSubmitted(false);
+                    setIsEditing(false);
+                    setDuration(null);
+                }
+            }, [activeQuestion?.id]);
+
+            // Submit Student Response
+            const handleSubmit = (answerValue) => {
+                const finalAnswer = answerValue || selectedAnswer || shortAnswer;
+                if (!finalAnswer) {
+                    showToast('請先填寫或選擇答案', 'error');
+                    return;
+                }
+
+                const elapsed = activeQuestion ? ((Date.now() - activeQuestion.startTime) / 1000).toFixed(1) : '0.0';
+                setDuration(elapsed);
+
+                const responsePayload = {
+                    studentId: studentId,
+                    name: studentName,
+                    answer: finalAnswer,
+                    duration: elapsed,
+                    timestamp: new Date().toLocaleTimeString('zh-HK')
+                };
+
+                // Sync to Firestore
+                if (window.firebaseDB && window.firebaseFS) {
+                    const { doc, setDoc } = window.firebaseFS;
+                    const roomDocRef = doc(window.firebaseDB, 'artifacts', 'omit-8c173', 'public', 'data', 'rooms', roomCode);
+                    setDoc(roomDocRef, {
+                        responses: {
+                            [studentId]: responsePayload
+                        }
+                    }, { merge: true }).catch(err => console.error(err));
+                }
+
+                // Sync via BroadcastChannel
+                if (bcRef.current) {
+                    bcRef.current.postMessage({
+                        type: 'STUDENT_SUBMIT',
+                        data: responsePayload
+                    });
+                }
+
+                setSubmitted(true);
+                setIsEditing(false);
+                showToast('答案已成功提交！', 'success');
+
+                // Confetti animation
+                if (window.confetti) {
+                    window.confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
+                }
+            };
+
+            return (
+                <div class="min-h-screen bg-slate-100 flex flex-col">
+                    {/* Header */}
+                    <header class="bg-indigo-600 text-white p-4 shadow-md flex items-center justify-between sticky top-0 z-30">
+                        <div class="flex items-center space-x-2">
+                            <span class="font-black text-xl tracking-tight">OMIT</span>
+                            <span class="text-xs bg-indigo-500 px-2.5 py-1 rounded-md font-bold">房號: {roomCode}</span>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <span class="text-xs font-bold bg-indigo-700/80 px-3 py-1.5 rounded-xl">👤 {studentName}</span>
+                            <button onClick={onExit} class="text-xs text-indigo-200 hover:text-white font-bold">退出</button>
+                        </div>
+                    </header>
+
+                    {/* Main Interaction Area */}
+                    <main class="flex-1 max-w-2xl w-full mx-auto p-4 flex flex-col justify-center">
+                        {!activeQuestion ? (
+                            <div class="bg-white rounded-3xl p-8 text-center space-y-4 shadow-sm border border-slate-200">
+                                <div class="text-5xl animate-bounce">⏳</div>
+                                <h3 class="text-xl font-bold text-slate-800">等待老師發佈題目...</h3>
+                                <p class="text-xs text-slate-400">題目發佈後將實時顯示於此畫面上</p>
+                            </div>
+                        ) : (
+                            <div class="bg-white rounded-3xl p-6 shadow-md border border-slate-200 space-y-6">
+                                {/* Question Title Banner */}
+                                <div class="space-y-2">
+                                    <div class="flex items-center justify-between text-xs font-bold text-indigo-600">
+                                        <span>模式: {activeQuestion.mode}</span>
+                                        <span>{activeQuestion.allowStudentEdit ? '🔓 可修改回應' : '🔒 一次性提交'}</span>
+                                    </div>
+                                    <h2 class="text-lg font-bold text-slate-800">{activeQuestion.text}</h2>
+                                </div>
+
+                                {/* Submitted Locked State */}
+                                {submitted && !isEditing ? (
+                                    <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 text-center space-y-4">
+                                        <div class="text-4xl">✅</div>
+                                        <h3 class="text-lg font-bold text-emerald-800">答案已成功提交！</h3>
+                                        <p class="text-xs text-emerald-600 font-mono">耗時: {duration} 秒</p>
+
+                                        {/* Feature 3: Allow edit button if enabled by teacher */}
+                                        {activeQuestion.allowStudentEdit ? (
+                                            <button
+                                                onClick={() => setIsEditing(true)}
+                                                class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition shadow-md active:scale-95"
+                                            >
+                                                ✏️ 修改答案
+                                            </button>
+                                        ) : (
+                                            <p class="text-[11px] text-slate-400">老師設定此題目提交後無法修改</p>
+                                        )}
+                                    </div>
+                                ) : (
+                                    /* Active Question Input Area */
+                                    <div class="space-y-6">
+                                        {/* CHOICE MODE */}
+                                        {activeQuestion.mode === 'CHOICE' && (
+                                            <div class="grid grid-cols-1 gap-3">
+                                                {activeQuestion.choiceOptions.map(opt => (
+                                                    <button
+                                                        key={opt}
+                                                        onClick={() => setSelectedAnswer(opt)}
+                                                        class={`p-4 rounded-2xl font-bold text-lg text-left transition border ${
+                                                            selectedAnswer === opt
+                                                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
+                                                                : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                                                        }`}
+                                                    >
+                                                        選項 {opt}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        {/* TF MODE */}
+                                        {activeQuestion.mode === 'TF' && (
+                                            <div class="grid grid-cols-2 gap-4">
+                                                {['O', 'X'].map(opt => (
+                                                    <button
+                                                        key={opt}
+                                                        onClick={() => setSelectedAnswer(opt)}
+                                                        class={`p-8 rounded-3xl font-black text-4xl transition border ${
+                                                            selectedAnswer === opt
+                                                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg'
+                                                                : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                                                        }`}
+                                                    >
+                                                        {opt}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        {/* SHORT ANSWER MODE */}
+                                        {activeQuestion.mode === 'SHORT' && (
+                                            <div>
+                                                <textarea
+                                                    rows={4}
+                                                    placeholder="請輸入你的回答..."
+                                                    value={shortAnswer}
+                                                    onChange={(e) => setShortAnswer(e.target.value)}
+                                                    class="w-full p-4 rounded-2xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-slate-50 text-sm font-medium"
+                                                />
+                                            </div>
+                                        )}
+
+                                        {/* DRAW / WHITEBOARD MODE with Feature 2 Background Image */}
+                                        {activeQuestion.mode === 'DRAW' && (
+                                            <StudentWhiteboard 
+                                                bgImage={activeQuestion.bgImage} 
+                                                onSave={(imageData) => handleSubmit(imageData)} 
+                                            />
+                                        )}
+
+                                        {/* Submit Button for non-whiteboard modes */}
+                                        {activeQuestion.mode !== 'DRAW' && (
+                                            <button
+                                                onClick={() => handleSubmit()}
+                                                class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-2xl transition shadow-lg shadow-indigo-100 active:scale-95"
+                                            >
+                                                確認提交 🚀
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </main>
+                </div>
+            );
+        }
+
+        function StudentWhiteboard({ bgImage, onSave }) {
+            const canvasRef = useRef(null);
+            const [color, setColor] = useState('#1e293b');
+            const [lineWidth, setLineWidth] = useState(4);
+            const [isDrawing, setIsDrawing] = useState(false);
+
+            // Draw background image onto canvas on initialization
+            useEffect(() => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+
+                // Set internal resolution
+                canvas.width = 600;
+                canvas.height = 400;
+
+                // Fill default white background
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                // If background image exists, load and draw it
+                if (bgImage) {
+                    const img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    img.onload = () => {
+                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    };
+                    img.src = bgImage;
+                }
+            }, [bgImage]);
+
+            const startDrawing = (e) => {
+                setIsDrawing(true);
+                draw(e);
+            };
+
+            const stopDrawing = () => {
+                setIsDrawing(false);
+                const canvas = canvasRef.current;
+                if (canvas) {
+                    const ctx = canvas.getContext('2d');
+                    ctx.beginPath();
+                }
+            };
+
+            const draw = (e) => {
+                if (!isDrawing) return;
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                const rect = canvas.getBoundingClientRect();
+                
+                // Calculate touch/mouse scaling factor
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                const x = (clientX - rect.left) * (canvas.width / rect.width);
+                const y = (clientY - rect.top) * (canvas.height / rect.height);
+
+                ctx.lineWidth = lineWidth;
+                ctx.lineCap = 'round';
+                ctx.strokeStyle = color;
+
+                ctx.lineTo(x, y);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+            };
+
+            const handleClear = () => {
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                if (bgImage) {
+                    const img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    img.onload = () => {
+                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    };
+                    img.src = bgImage;
+                }
+            };
+
+            const handleFinish = () => {
+                const canvas = canvasRef.current;
+                if (canvas) {
+                    const dataUrl = canvas.toDataURL('image/png');
+                    onSave(dataUrl);
+                }
+            };
+
+            return (
+                <div class="space-y-4">
+                    {/* Toolbar */}
+                    <div class="flex items-center justify-between bg-slate-50 p-2.5 rounded-2xl border border-slate-200">
+                        <div class="flex items-center space-x-2">
+                            {['#1e293b', '#ef4444', '#2563eb', '#10b981', '#f59e0b'].map(c => (
+                                <button
+                                    key={c}
+                                    onClick={() => setColor(c)}
+                                    class={`w-7 h-7 rounded-full border-2 transition ${color === c ? 'scale-110 border-slate-800 shadow' : 'border-transparent'}`}
+                                    style={{ backgroundColor: c }}
+                                />
+                            ))}
+                        </div>
+
+                        <div class="flex items-center space-x-2">
+                            <button
+                                onClick={handleClear}
+                                class="text-xs text-slate-500 hover:text-slate-800 font-bold px-2 py-1 bg-white border rounded-lg"
+                            >
+                                清除
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Canvas Area */}
+                    <div class="canvas-container border border-slate-300 rounded-2xl overflow-hidden shadow-inner bg-white touch-none">
+                        <canvas
+                            ref={canvasRef}
+                            onMouseDown={startDrawing}
+                            onMouseUp={stopDrawing}
+                            onMouseMove={draw}
+                            onTouchStart={startDrawing}
+                            onTouchEnd={stopDrawing}
+                            onTouchMove={draw}
+                            class="w-full h-auto max-h-[350px] block cursor-crosshair"
+                        />
+                    </div>
+
+                    <button
+                        onClick={handleFinish}
+                        class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-2xl transition shadow-md active:scale-95"
+                    >
+                        提交畫布作品 🎨
+                    </button>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<OMITApp />);
+    </script>
+</body>
+</html>
