@@ -1,0 +1,2761 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>宣道會陳元喜小學 OMIT互動課堂</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Mammoth.js for Word (.docx) Parsing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <!-- JSZip for generating docx templates and exporting audio/data -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Noto Sans TC', -apple-system, BlinkMacSystemFont, sans-serif;
+            touch-action: manipulation;
+        }
+        .canvas-container {
+            touch-action: none;
+        }
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 9999px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        @keyframes pulse-gold {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 15px rgba(234, 179, 8, 0.5); }
+            50% { transform: scale(1.03); box-shadow: 0 0 25px rgba(234, 179, 8, 0.8); }
+        }
+        .gold-trophy {
+            animation: pulse-gold 2s infinite ease-in-out;
+        }
+    </style>
+
+    <!-- Firebase SDK Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore, doc, setDoc, getDoc, updateDoc, deleteDoc, onSnapshot, collection, getDocs
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAcphRXxqs_MTeWwffVVOFsnb8Liro5Lto",
+            authDomain: "omit-8c173.firebaseapp.com",
+            projectId: "omit-8c173",
+            storageBucket: "omit-8c173.firebasestorage.app",
+            messagingSenderId: "1078509757779",
+            appId: "1:1078509757779:web:64fe9465920eca4f38ada6"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        window.fbApp = app;
+        window.fbAuth = auth;
+        window.fbDb = db;
+        window.fbUtils = {
+            signInAnonymously,
+            doc, setDoc, getDoc, updateDoc, deleteDoc, onSnapshot, collection, getDocs
+        };
+    </script>
+</head>
+<body class="bg-slate-100 text-slate-800 antialiased min-h-screen selection:bg-indigo-500 selection:text-white">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        // Group Animal Presets for Cooperative Questions
+        const ANIMAL_GROUPS = [
+            { name: '老虎組', emoji: '🐅', color: 'bg-amber-500 text-white border-amber-600', bgLight: 'bg-amber-50' },
+            { name: '大象組', emoji: '🐘', color: 'bg-blue-600 text-white border-blue-700', bgLight: 'bg-blue-50' },
+            { name: '企鵝組', emoji: '🐧', color: 'bg-cyan-600 text-white border-cyan-700', bgLight: 'bg-cyan-50' },
+            { name: '藍鯨組', emoji: '🐋', color: 'bg-indigo-600 text-white border-indigo-700', bgLight: 'bg-indigo-50' },
+            { name: '白兔組', emoji: '🐰', color: 'bg-pink-500 text-white border-pink-600', bgLight: 'bg-pink-50' },
+            { name: '熊貓組', emoji: '🐼', color: 'bg-slate-800 text-white border-slate-900', bgLight: 'bg-slate-100' },
+            { name: '獅子組', emoji: '🦁', color: 'bg-orange-500 text-white border-orange-600', bgLight: 'bg-orange-50' },
+            { name: '白羊組', emoji: '🐏', color: 'bg-emerald-600 text-white border-emerald-700', bgLight: 'bg-emerald-50' },
+            { name: '水牛組', emoji: '🐃', color: 'bg-stone-700 text-white border-stone-800', bgLight: 'bg-stone-100' },
+            { name: '斑馬組', emoji: '🦓', color: 'bg-purple-600 text-white border-purple-700', bgLight: 'bg-purple-50' }
+        ];
+
+        // Mode label helper
+        function getModeLabel(mode) {
+            switch(mode) {
+                case 'CHOICE': return '選擇題';
+                case 'TF': return '是非題';
+                case 'SHORT': return '短答題';
+                case 'DRAW': return '白板題';
+                case 'BUZZER': return '搶答題';
+                case 'AUDIO': return '錄音題';
+                case 'CHALLENGE': return '挑戰題';
+                case 'COOP': return '合作題';
+                case 'LINK': return '派送連結';
+                default: return '題目';
+            }
+        }
+
+        // Default question prompts
+        function getDefaultQuestionPrompt(mode) {
+            switch(mode) {
+                case 'CHOICE': return '請選擇正確答案：';
+                case 'TF': return '請判斷下列描述是否正確：';
+                case 'SHORT': return '請輸入您的回答：';
+                case 'DRAW': return '請在白板上作答或繪圖：';
+                case 'BUZZER': return '請準備點擊搶答按鈕！';
+                case 'AUDIO': return '請錄製語音回答：';
+                case 'CHALLENGE': return '請在限時內完成以下挑戰題評估：';
+                case 'COOP': return '合作題比賽進行中，請與組員密切配合！';
+                case 'LINK': return '請點擊或觀看下方派送內容：';
+                default: return '請回答問題：';
+            }
+        }
+
+        // Sound Generator using Web Audio API
+        const playSound = (type) => {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                if (ctx.state === 'suspended') ctx.resume();
+
+                if (type === 'buzzer') {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(880, ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.3);
+                    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.3);
+                } else if (type === 'spin') {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(600, ctx.currentTime);
+                    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.08);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.08);
+                } else if (type === 'win') {
+                    const notes = [523.25, 659.25, 783.99, 1046.50];
+                    notes.forEach((freq, idx) => {
+                        const osc = ctx.createOscillator();
+                        const gain = ctx.createGain();
+                        osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.1);
+                        gain.gain.setValueAtTime(0.2, ctx.currentTime + idx * 0.1);
+                        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + idx * 0.1 + 0.3);
+                        osc.connect(gain);
+                        gain.connect(ctx.destination);
+                        osc.start(ctx.currentTime + idx * 0.1);
+                        osc.stop(ctx.currentTime + idx * 0.1 + 0.3);
+                    });
+                } else if (type === 'alarm') {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(900, ctx.currentTime);
+                    osc.frequency.setValueAtTime(600, ctx.currentTime + 0.15);
+                    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.4);
+                }
+            } catch (e) {
+                console.error("Audio error:", e);
+            }
+        };
+
+        const Toast = ({ message, type, onClose }) => {
+            useEffect(() => {
+                const timer = setTimeout(onClose, 3000);
+                return () => clearTimeout(timer);
+            }, [onClose]);
+
+            const bgColor = type === 'error' ? 'bg-red-500' : type === 'success' ? 'bg-emerald-500' : 'bg-indigo-600';
+
+            return (
+                <div class={`fixed top-4 right-4 z-50 ${bgColor} text-white px-5 py-3 rounded-xl shadow-2xl flex items-center space-x-2 text-sm font-medium animate-bounce`}>
+                    <span>{message}</span>
+                </div>
+            );
+        };
+
+        const extractYouTubeEmbed = (url) => {
+            if (!url) return null;
+            const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+            const match = url.match(regExp);
+            return (match && match[2].length === 11) ? `https://www.youtube.com/embed/${match[2]}?autoplay=1` : null;
+        };
+
+        // Word (.docx) generator helper
+        const createWordDocxBlob = async (textLines) => {
+            if (!window.JSZip) throw new Error("JSZip not loaded");
+            const zip = new JSZip();
+
+            zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`);
+
+            zip.file("_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`);
+
+            zip.file("word/_rels/document.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>`);
+
+            const escapeXml = (str) => String(str).replace(/[<>&'"]/g, (c) => {
+                switch (c) {
+                    case '<': return '&lt;';
+                    case '>': return '&gt;';
+                    case '&': return '&amp;';
+                    case '\'': return '&apos;';
+                    case '"': return '&quot;';
+                    default: return c;
+                }
+            });
+
+            const paragraphsXml = textLines.map(line => `<w:p><w:r><w:t>${escapeXml(line)}</w:t></w:r></w:p>`).join('\n');
+
+            zip.file("word/document.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>${paragraphsXml}</w:body>
+</w:document>`);
+
+            return await zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+        };
+
+        // Parse Word / Text Challenge format
+        const parseWordChallengeText = (rawText) => {
+            const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+            let title = '地球生病了';
+            let totalScore = 100;
+            const questions = [];
+
+            let currentQ = null;
+
+            lines.forEach((line) => {
+                if (/^(標題|Title)[：:]/i.test(line)) {
+                    title = line.replace(/^(標題|Title)[：:]/i, '').trim();
+                    return;
+                }
+                if (/^(總分|Total)[：:]/i.test(line)) {
+                    const scoreStr = line.replace(/^(總分|Total)[：:]/i, '').replace(/分/g, '').trim();
+                    totalScore = parseInt(scoreStr) || 100;
+                    return;
+                }
+
+                const qMatch = line.match(/^([0-9]+)[\.、\:]\s*(.+)/);
+                if (qMatch) {
+                    if (currentQ && currentQ.options.length > 0) {
+                        questions.push(currentQ);
+                    }
+                    currentQ = {
+                        num: parseInt(qMatch[1]),
+                        text: qMatch[2].trim(),
+                        options: [],
+                        answer: 'A'
+                    };
+                    return;
+                }
+
+                const optMatch = line.match(/^([A-D])[\.、]\s*(.+)/i);
+                if (optMatch && currentQ) {
+                    const letter = optMatch[1].toUpperCase();
+                    let optText = optMatch[2].trim();
+                    
+                    let isCorrect = false;
+                    if (line.includes('*') || optText.endsWith('*')) {
+                        isCorrect = true;
+                        optText = optText.replace(/\*/g, '').trim();
+                    }
+
+                    currentQ.options.push({
+                        letter: letter,
+                        text: optText
+                    });
+
+                    if (isCorrect) {
+                        currentQ.answer = letter;
+                    }
+                }
+            });
+
+            if (currentQ && currentQ.options.length > 0) {
+                questions.push(currentQ);
+            }
+
+            if (questions.length === 0) {
+                return {
+                    title: title || "地球生病了",
+                    totalScore: 100,
+                    questions: [
+                        {
+                            num: 1,
+                            text: "以下哪一項不是地球的天然資源?",
+                            options: [
+                                { letter: "A", text: "水資源" },
+                                { letter: "B", text: "植物資源" },
+                                { letter: "C", text: "動物資源" },
+                                { letter: "D", text: "機械資源" }
+                            ],
+                            answer: "D"
+                        },
+                        {
+                            num: 2,
+                            text: "芝士的原料屬於哪一項地球的天然資源?",
+                            options: [
+                                { letter: "A", text: "水資源" },
+                                { letter: "B", text: "植物資源" },
+                                { letter: "C", text: "動物資源" },
+                                { letter: "D", text: "礦產資源" }
+                            ],
+                            answer: "C"
+                        }
+                    ]
+                };
+            }
+
+            return { title, totalScore, questions };
+        };
+
+        const WhiteboardCanvas = ({ initialImage, onSave, isReadOnly = false, broadcastMode = false }) => {
+            const canvasRef = useRef(null);
+            const [isDrawing, setIsDrawing] = useState(false);
+            const [color, setColor] = useState('#2563eb');
+            const [penSize, setPenSize] = useState(4);
+            const [isEraser, setIsEraser] = useState(false);
+            const [bgImage, setBgImage] = useState(initialImage || null);
+
+            // Standard resolution constant 1280x720
+            const CANVAS_WIDTH = 1280;
+            const CANVAS_HEIGHT = 720;
+
+            useEffect(() => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+
+                // Render background
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+                if (bgImage) {
+                    const img = new Image();
+                    img.crossOrigin = "anonymous";
+                    img.onload = () => {
+                        ctx.drawImage(img, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+                    };
+                    img.src = bgImage;
+                }
+            }, [bgImage]);
+
+            // Ratio mapping formula for iPad / tablet precision touch
+            const getCanvasPos = (e) => {
+                const canvas = canvasRef.current;
+                if (!canvas) return { x: 0, y: 0 };
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = CANVAS_WIDTH / rect.width;
+                const scaleY = CANVAS_HEIGHT / rect.height;
+
+                let clientX = e.clientX;
+                let clientY = e.clientY;
+
+                if (e.touches && e.touches[0]) {
+                    clientX = e.touches[0].clientX;
+                    clientY = e.touches[0].clientY;
+                }
+
+                return {
+                    x: (clientX - rect.left) * scaleX,
+                    y: (clientY - rect.top) * scaleY
+                };
+            };
+
+            const startDrawing = (e) => {
+                if (isReadOnly) return;
+                e.preventDefault();
+                setIsDrawing(true);
+                const pos = getCanvasPos(e);
+                const ctx = canvasRef.current.getContext('2d');
+                ctx.beginPath();
+                ctx.moveTo(pos.x, pos.y);
+            };
+
+            const draw = (e) => {
+                if (!isDrawing || isReadOnly) return;
+                e.preventDefault();
+                const pos = getCanvasPos(e);
+                const ctx = canvasRef.current.getContext('2d');
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+
+                if (isEraser) {
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = penSize * 3;
+                } else {
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = penSize;
+                }
+
+                ctx.lineTo(pos.x, pos.y);
+                ctx.stroke();
+            };
+
+            const stopDrawing = () => {
+                if (!isDrawing) return;
+                setIsDrawing(false);
+                if (onSave) {
+                    const dataUrl = canvasRef.current.toDataURL('image/png');
+                    onSave(dataUrl);
+                }
+            };
+
+            const handleClear = () => {
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+                if (bgImage) {
+                    const img = new Image();
+                    img.crossOrigin = "anonymous";
+                    img.onload = () => {
+                        ctx.drawImage(img, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+                        if (onSave) onSave(canvas.toDataURL('image/png'));
+                    };
+                    img.src = bgImage;
+                } else if (onSave) {
+                    onSave(canvas.toDataURL('image/png'));
+                }
+            };
+
+            const handleBgUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    setBgImage(evt.target.result);
+                };
+                reader.readAsDataURL(file);
+            };
+
+            return (
+                <div class="flex flex-col space-y-3 w-full">
+                    {!isReadOnly && (
+                        <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-800 text-white p-3 rounded-2xl shadow-md">
+                            <div class="flex items-center space-x-3">
+                                {/* Color pickers */}
+                                <div class="flex items-center space-x-1">
+                                    {['#2563eb', '#dc2626', '#16a34a', '#d97706', '#000000'].map(c => (
+                                        <button 
+                                            key={c}
+                                            onClick={() => { setColor(c); setIsEraser(false); }}
+                                            class={`w-7 h-7 rounded-full border-2 transition ${color === c && !isEraser ? 'ring-2 ring-white scale-110' : 'opacity-80'}`}
+                                            style={{ backgroundColor: c }}
+                                        />
+                                    ))}
+                                </div>
+
+                                <div class="h-6 w-px bg-slate-600"></div>
+
+                                {/* Stroke size 2px - 18px */}
+                                <div class="flex items-center space-x-2 text-xs font-medium">
+                                    <span>粗幼 ({penSize}px):</span>
+                                    <input 
+                                        type="range" 
+                                        min="2" 
+                                        max="18" 
+                                        value={penSize} 
+                                        onChange={(e) => setPenSize(parseInt(e.target.value))}
+                                        class="w-24 accent-indigo-400"
+                                    />
+                                </div>
+                            </div>
+
+                            <div class="flex items-center space-x-2">
+                                <button 
+                                    onClick={() => setIsEraser(!isEraser)}
+                                    class={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center space-x-1 ${isEraser ? 'bg-amber-500 text-white' : 'bg-slate-700 hover:bg-slate-600'}`}
+                                >
+                                    <span>🧽 擦膠</span>
+                                </button>
+
+                                <button 
+                                    onClick={handleClear}
+                                    class="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-xs flex items-center space-x-1"
+                                >
+                                    <span>🗑️ 清空</span>
+                                </button>
+
+                                <label class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs flex items-center space-x-1 cursor-pointer">
+                                    <span>🖼️ 上載背景</span>
+                                    <input type="file" accept="image/*" onChange={handleBgUpload} class="hidden" />
+                                </label>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Canvas Frame with 16:9 ratio */}
+                    <div class="relative w-full aspect-16-9 bg-white rounded-2xl shadow-lg border-2 border-slate-200 overflow-hidden canvas-container">
+                        <canvas 
+                            ref={canvasRef}
+                            width={CANVAS_WIDTH}
+                            height={CANVAS_HEIGHT}
+                            onMouseDown={startDrawing}
+                            onMouseMove={draw}
+                            onMouseUp={stopDrawing}
+                            onMouseLeave={stopDrawing}
+                            onTouchStart={startDrawing}
+                            onTouchMove={draw}
+                            onTouchEnd={stopDrawing}
+                            class="w-full h-full block cursor-crosshair touch-none"
+                        />
+                    </div>
+                </div>
+            );
+        };
+
+        const TeacherWhiteboardModal = ({ onClose, onBroadcast, isBroadcasting, roomCode }) => {
+            const [savedCanvasData, setSavedCanvasData] = useState(null);
+
+            const handleCanvasSave = (dataUrl) => {
+                setSavedCanvasData(dataUrl);
+                if (isBroadcasting) {
+                    onBroadcast(dataUrl);
+                }
+            };
+
+            const toggleBroadcast = () => {
+                if (isBroadcasting) {
+                    onBroadcast(null); // Stop broadcast
+                } else {
+                    onBroadcast(savedCanvasData); // Start broadcast
+                }
+            };
+
+            return (
+                <div class="fixed inset-0 bg-slate-950/90 z-50 flex flex-col p-4 md:p-6 animate-fade-in">
+                    <div class="flex items-center justify-between mb-3 text-white">
+                        <div class="flex items-center space-x-3">
+                            <span class="text-2xl">🎨</span>
+                            <div>
+                                <h2 class="text-xl font-bold">宣道會陳元喜小學 - 教師即時示範白板</h2>
+                                <p class="text-xs text-slate-400">專用1280x720畫布 | 支援 iPad 觸控畫筆精準映射</p>
+                            </div>
+                        </div>
+                        {isBroadcasting && (
+                            <div class="flex items-center space-x-2 bg-red-600/90 text-white px-4 py-1.5 rounded-full animate-pulse text-xs font-bold">
+                                <span>📡 廣播同步中... 學生畫面上顯示此白板</span>
+                            </div>
+                        )}
+                    </div>
+
+                    <div class="flex-grow flex items-center justify-center max-w-5xl mx-auto w-full">
+                        <WhiteboardCanvas onSave={handleCanvasSave} />
+                    </div>
+
+                    <div class="mt-4 flex items-center justify-between max-w-5xl mx-auto w-full pt-2 border-t border-slate-800">
+                        <button 
+                            onClick={toggleBroadcast}
+                            class={`px-6 py-3 rounded-xl font-bold text-sm shadow-xl flex items-center space-x-2 transition ${isBroadcasting ? 'bg-amber-500 hover:bg-amber-600 text-white ring-4 ring-amber-300' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}`}
+                        >
+                            <span>{isBroadcasting ? '📡 取消廣播分享' : '📡 廣播分享至全班學生螢幕'}</span>
+                        </button>
+
+                        <button 
+                            onClick={onClose}
+                            class="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-bold text-sm"
+                        >
+                            關閉白板
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        function OMITApp() {
+            const [role, setRole] = useState('LANDING'); 
+            const [roomCode, setRoomCode] = useState('');
+            const [seatNumber, setSeatNumber] = useState('1');
+            const [studentName, setStudentName] = useState('');
+            const [teacherPassword, setTeacherPassword] = useState('');
+            const [showPasswordModal, setShowPasswordModal] = useState(false);
+            const [toast, setToast] = useState(null);
+
+            const [activeQuestion, setActiveQuestion] = useState(null);
+            const [studentsList, setStudentsList] = useState([]);
+            const [responses, setResponses] = useState({});
+            const [historyQuestions, setHistoryQuestions] = useState([]);
+            const [isAuthReady, setIsAuthReady] = useState(false);
+            const [teacherDemoWhiteboard, setTeacherDemoWhiteboard] = useState(null);
+            const [broadcastedStudentWork, setBroadcastedStudentWork] = useState(null);
+            const [coopGameState, setCoopGameState] = useState(null);
+
+            const myStudentId = useRef('std_' + Math.random().toString(36).substring(2, 9));
+
+            const showToast = (message, type = 'info') => {
+                setToast({ message, type });
+            };
+
+            useEffect(() => {
+                const initAuth = async () => {
+                    try {
+                        if (window.fbUtils && window.fbAuth) {
+                            await window.fbUtils.signInAnonymously(window.fbAuth);
+                            setIsAuthReady(true);
+                        }
+                    } catch (err) {
+                        console.error("Firebase auth failed:", err);
+                    }
+                };
+                initAuth();
+            }, []);
+
+            useEffect(() => {
+                const params = new URLSearchParams(window.location.search);
+                const roomParam = params.get('room');
+                if (roomParam) {
+                    setRoomCode(roomParam.toUpperCase());
+                }
+            }, []);
+
+            // Firebase Firestore Listener for real-time room data sync
+            useEffect(() => {
+                if (!roomCode || !isAuthReady) return;
+
+                const appId = "omit-8c173";
+                const db = window.fbDb;
+                const { doc, onSnapshot, collection } = window.fbUtils;
+
+                const roomDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode);
+                const studentsColRef = collection(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode, 'students');
+                const responsesColRef = collection(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode, 'responses');
+
+                const unsubRoom = onSnapshot(roomDocRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        setActiveQuestion(data.activeQuestion || null);
+                        if (data.history) setHistoryQuestions(data.history);
+                        setTeacherDemoWhiteboard(data.teacherDemoWhiteboard || null);
+                        setBroadcastedStudentWork(data.broadcastedStudentWork || null);
+                        setCoopGameState(data.coopGameState || null);
+                    }
+                }, (err) => console.error("Room sub error:", err));
+
+                const unsubStudents = onSnapshot(studentsColRef, (snapshot) => {
+                    const list = [];
+                    snapshot.forEach((d) => list.push(d.data()));
+                    setStudentsList(list);
+                }, (err) => console.error("Students sub error:", err));
+
+                const unsubResponses = onSnapshot(responsesColRef, (snapshot) => {
+                    const resMap = {};
+                    snapshot.forEach((d) => {
+                        resMap[d.id] = d.data();
+                    });
+                    setResponses(resMap);
+                }, (err) => console.error("Responses sub error:", err));
+
+                return () => {
+                    unsubRoom();
+                    unsubStudents();
+                    unsubResponses();
+                };
+            }, [roomCode, isAuthReady]);
+
+            const handleTeacherAccessRequest = () => {
+                setShowPasswordModal(true);
+                setTeacherPassword('');
+            };
+
+            const verifyTeacherPassword = (e) => {
+                e?.preventDefault();
+                if (teacherPassword === '8030') {
+                    const generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
+                    setRoomCode(generatedCode);
+                    setRole('TEACHER');
+                    setShowPasswordModal(false);
+                    showToast(`密碼正確！已建立課堂 房號：${generatedCode}`, 'success');
+                } else {
+                    showToast('密碼錯誤，請重新輸入！', 'error');
+                }
+            };
+
+            const handleJoinRoom = (e) => {
+                e?.preventDefault();
+                if (!roomCode.trim()) {
+                    showToast('請輸入6位數字房號', 'error');
+                    return;
+                }
+
+                const studentObj = {
+                    id: myStudentId.current,
+                    seatNumber: parseInt(seatNumber) || 1,
+                    name: studentName.trim() || `${seatNumber}號學生`,
+                    joinTime: new Date().toLocaleTimeString('zh-HK', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                };
+
+                const appId = "omit-8c173";
+                const db = window.fbDb;
+                const studentDocRef = window.fbUtils.doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode, 'students', myStudentId.current);
+                window.fbUtils.setDoc(studentDocRef, studentObj);
+
+                setRole('STUDENT');
+                showToast(`已進入房號 ${roomCode} 的課堂`, 'success');
+            };
+
+            if (role === 'LANDING') {
+                return (
+                    <div class="min-h-screen bg-gradient-to-br from-indigo-900 via-indigo-800 to-purple-900 flex items-center justify-center p-4">
+                        {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+                        
+                        <div class="max-w-md w-full bg-white rounded-3xl shadow-2xl p-8 space-y-8 relative overflow-hidden border border-white/20">
+                            <div class="text-center space-y-2">
+                                <p class="text-indigo-600 font-extrabold text-lg md:text-xl tracking-wider">宣道會陳元喜小學</p>
+                                <h1 class="text-2xl md:text-3xl font-black text-slate-800 tracking-tight">OMIT互動課堂</h1>
+                                <p class="text-slate-500 text-xs">免登入！即時反應、互動學習與合作答題平台</p>
+                            </div>
+
+                            <div class="space-y-6">
+                                <form onSubmit={handleJoinRoom} class="bg-indigo-50/80 p-5 rounded-2xl border border-indigo-100 space-y-4">
+                                    <h2 class="text-xs font-bold text-indigo-700 uppercase tracking-wider">學生加入課堂</h2>
+                                    <div>
+                                        <label class="text-xs text-slate-500 font-medium mb-1 block">1. 課堂房號</label>
+                                        <input 
+                                            type="text" 
+                                            placeholder="請輸入6位房號" 
+                                            value={roomCode} 
+                                            onChange={(e) => setRoomCode(e.target.value)}
+                                            class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white font-mono text-center tracking-widest text-lg font-bold"
+                                            maxLength={6}
+                                        />
+                                    </div>
+
+                                    <div class="grid grid-cols-3 gap-2">
+                                        <div class="col-span-1">
+                                            <label class="text-xs text-slate-500 font-medium mb-1 block">2. 學號 *</label>
+                                            <select 
+                                                value={seatNumber}
+                                                onChange={(e) => setSeatNumber(e.target.value)}
+                                                class="w-full px-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white font-bold text-center"
+                                            >
+                                                {Array.from({ length: 36 }, (_, i) => i + 1).map((num) => (
+                                                    <option key={num} value={num}>{num} 號</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div class="col-span-2">
+                                            <label class="text-xs text-slate-500 font-medium mb-1 block">3. 姓名 (可留空)</label>
+                                            <input 
+                                                type="text" 
+                                                placeholder="輸入姓名 / 暱稱" 
+                                                value={studentName} 
+                                                onChange={(e) => setStudentName(e.target.value)}
+                                                class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white font-medium"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <button 
+                                        type="submit" 
+                                        class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-xl transition shadow-lg shadow-indigo-200 active:scale-98"
+                                    >
+                                        進入課堂 🚀
+                                    </button>
+                                </form>
+
+                                <div class="relative flex py-1 items-center">
+                                    <div class="flex-grow border-t border-slate-200"></div>
+                                    <span class="flex-shrink mx-4 text-slate-400 text-xs font-medium">教師入口</span>
+                                    <div class="flex-grow border-t border-slate-200"></div>
+                                </div>
+
+                                <div class="text-center">
+                                    <button 
+                                        onClick={handleTeacherAccessRequest}
+                                        class="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3.5 rounded-xl transition shadow-md flex items-center justify-center space-x-2 active:scale-98"
+                                    >
+                                        <span>👨‍🏫 開啟新課堂 (教師控制台)</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {showPasswordModal && (
+                            <div class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                                <div class="bg-white rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl">
+                                    <h3 class="text-lg font-bold text-slate-800 text-center">請輸入教師驗證密碼</h3>
+                                    <form onSubmit={verifyTeacherPassword} class="space-y-4">
+                                        <input 
+                                            type="password" 
+                                            value={teacherPassword}
+                                            onChange={(e) => setTeacherPassword(e.target.value)}
+                                            class="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-indigo-500 text-center font-mono text-xl tracking-widest"
+                                            autoFocus
+                                        />
+                                        <div class="flex space-x-2">
+                                            <button 
+                                                type="button" 
+                                                onClick={() => setShowPasswordModal(false)}
+                                                class="w-1/2 py-2.5 rounded-xl bg-slate-100 font-medium text-slate-600 hover:bg-slate-200"
+                                            >
+                                                取消
+                                            </button>
+                                            <button 
+                                                type="submit" 
+                                                class="w-1/2 py-2.5 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 shadow-md"
+                                            >
+                                                進入
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                );
+            }
+
+            if (role === 'TEACHER') {
+                return (
+                    <TeacherDashboard 
+                        roomCode={roomCode} 
+                        activeQuestion={activeQuestion} 
+                        setActiveQuestion={setActiveQuestion}
+                        responses={responses}
+                        setResponses={setResponses}
+                        studentsList={studentsList}
+                        historyQuestions={historyQuestions}
+                        setHistoryQuestions={setHistoryQuestions}
+                        coopGameState={coopGameState}
+                        setCoopGameState={setCoopGameState}
+                        showToast={showToast}
+                        onExit={() => setRole('LANDING')}
+                    />
+                );
+            }
+
+            if (role === 'STUDENT') {
+                return (
+                    <StudentInterface 
+                        roomCode={roomCode}
+                        studentName={studentName}
+                        seatNumber={seatNumber}
+                        studentId={myStudentId.current}
+                        activeQuestion={activeQuestion}
+                        responses={responses}
+                        studentsList={studentsList}
+                        teacherDemoWhiteboard={teacherDemoWhiteboard}
+                        broadcastedStudentWork={broadcastedStudentWork}
+                        coopGameState={coopGameState}
+                        showToast={showToast}
+                        onExit={() => setRole('LANDING')}
+                    />
+                );
+            }
+
+            return null;
+        }
+
+        function TeacherDashboard({ roomCode, activeQuestion, setActiveQuestion, responses, setResponses, studentsList, historyQuestions, setHistoryQuestions, coopGameState, setCoopGameState, showToast, onExit }) {
+            const [selectedMode, setSelectedMode] = useState('CHOICE'); 
+            const [questionText, setQuestionText] = useState('');
+            const [choiceCount, setChoiceCount] = useState(4);
+            const [lockAfterSubmit, setLockAfterSubmit] = useState(true);
+            const [whiteboardBg, setWhiteboardBg] = useState(null);
+            const [pushedUrl, setPushedUrl] = useState('');
+
+            // Modals & Tools
+            const [showQRModal, setShowQRModal] = useState(false);
+            const [showStudentListModal, setShowStudentListModal] = useState(false);
+            const [showInspectModal, setShowInspectModal] = useState(null); // student ID or object to inspect
+            const [barChoiceFilter, setBarChoiceFilter] = useState(null);
+            const [showTeacherDemoBoard, setShowTeacherDemoBoard] = useState(false);
+            const [isBroadcastingTeacherBoard, setIsBroadcastingTeacherBoard] = useState(false);
+
+            // Random Selector State
+            const [showRandomModal, setShowRandomModal] = useState(false);
+            const [rangeStart, setRangeStart] = useState(1);
+            const [rangeEnd, setRangeEnd] = useState(36);
+            const [drawnNumbers, setDrawnNumbers] = useState([]);
+            const [currentDrawn, setCurrentDrawn] = useState(null);
+            const [isSpinning, setIsSpinning] = useState(false);
+
+            // Timer Modal State
+            const [showTimerModal, setShowTimerModal] = useState(false);
+            const [timerSeconds, setTimerSeconds] = useState(0);
+            const [timerActive, setTimerActive] = useState(false);
+            const [timerZoomed, setTimerZoomed] = useState(false);
+            const [customTimerMin, setCustomTimerMin] = useState('01');
+            const [customTimerSec, setCustomTimerSec] = useState('00');
+
+            // Challenge Question Setup States
+            const [challengeData, setChallengeData] = useState(null);
+            const [challengeEnableTimer, setChallengeEnableTimer] = useState(true);
+            const [challengeTimeLimit, setChallengeTimeLimit] = useState(120); 
+            const [challengeMinInput, setChallengeMinInput] = useState('02');
+            const [challengeSecInput, setChallengeSecInput] = useState('00');
+            const [challengeReleaseInstant, setChallengeReleaseInstant] = useState(false); // Default: wait for teacher
+            const [showChallengeScoresOnLeaderboard, setShowChallengeScoresOnLeaderboard] = useState(false);
+            const [docxFileName, setDocxFileName] = useState('');
+
+            // Cooperative Question Setup States
+            const [coopData, setCoopData] = useState(null);
+            const [coopStage, setCoopStage] = useState('PREPARE'); // 'PREPARE', 'GROUP', 'RACE'
+            const [coopGroups, setCoopGroups] = useState([]);
+            const [coopDocxName, setCoopDocxName] = useState('');
+            const [coopIsMuted, setCoopIsMuted] = useState(false);
+
+            const joinUrl = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
+            const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(joinUrl)}`;
+
+            // Current question submissions
+            const currentQuestionResponses = useMemo(() => {
+                if (!activeQuestion) return {};
+                const filtered = {};
+                Object.values(responses).forEach(r => {
+                    if (r.questionId === activeQuestion.id) {
+                        filtered[r.studentId] = r;
+                    }
+                });
+                return filtered;
+            }, [responses, activeQuestion]);
+
+            // Ordered responses by submit time for Leaderboard
+            const leaderboardList = useMemo(() => {
+                const list = Object.values(currentQuestionResponses);
+                return list.sort((a, b) => (a.submitTimestamp || 0) - (b.submitTimestamp || 0));
+            }, [currentQuestionResponses]);
+
+            // Timer countdown effect
+            useEffect(() => {
+                let interval = null;
+                if (timerActive && timerSeconds > 0) {
+                    interval = setInterval(() => {
+                        setTimerSeconds(s => {
+                            if (s <= 1) {
+                                setTimerActive(false);
+                                playSound('alarm');
+                                return 0;
+                            }
+                            return s - 1;
+                        });
+                    }, 1000);
+                }
+                return () => clearInterval(interval);
+            }, [timerActive, timerSeconds]);
+
+            // Firestore sync helper
+            const updateRoomInFirestore = async (data) => {
+                const appId = "omit-8c173";
+                const db = window.fbDb;
+                const roomDocRef = window.fbUtils.doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode);
+                await window.fbUtils.setDoc(roomDocRef, { ...data, updatedAt: Date.now() }, { merge: true });
+            };
+
+            const handleExitRoom = async () => {
+                if (window.confirm("確定退出課室？將會同步清空此課室於 Firebase 的所有暫存紀錄！")) {
+                    try {
+                        const appId = "omit-8c173";
+                        const db = window.fbDb;
+                        
+                        const responsesColRef = window.fbUtils.collection(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode, 'responses');
+                        const resSnaps = await window.fbUtils.getDocs(responsesColRef);
+                        resSnaps.forEach(async (d) => { await window.fbUtils.deleteDoc(d.ref); });
+
+                        const studentsColRef = window.fbUtils.collection(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode, 'students');
+                        const stuSnaps = await window.fbUtils.getDocs(studentsColRef);
+                        stuSnaps.forEach(async (d) => { await window.fbUtils.deleteDoc(d.ref); });
+
+                        const roomDocRef = window.fbUtils.doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode);
+                        await window.fbUtils.deleteDoc(roomDocRef);
+
+                        showToast("課室資料已完全清空！", "info");
+                    } catch (e) {
+                        console.error("Cleanup error:", e);
+                    }
+                    onExit();
+                }
+            };
+
+            // Download Challenge Word Template
+            const handleDownloadChallengeTemplate = async () => {
+                const sampleLines = [
+                    "標題：地球生病了",
+                    "總分: 100分",
+                    "1.以下哪一項不是地球的天然資源?",
+                    "A. 水資源",
+                    "B. 植物資源",
+                    "C. 動物資源",
+                    "D. 機械資源*",
+                    "",
+                    "2.芝士的原料屬於哪一項地球的天然資源?",
+                    "A. 水資源",
+                    "B. 植物資源",
+                    "C. 動物資源*",
+                    "D. 礦產資源",
+                    "",
+                    "3.人們不當使用水資源會造成甚麼後果?",
+                    "A. 引發極端天氣",
+                    "B. 引發水災",
+                    "C. 水土流失",
+                    "D. 影響食水供應*",
+                    "",
+                    "4.人們不當使用煤和石油資源會造成甚麼後果?",
+                    "A. 引發極端天氣*",
+                    "B. 引發水災",
+                    "C. 水土流失",
+                    "D. 影響食水供應",
+                    "",
+                    "5.人們不當使用土地資源會造成甚麼後果?",
+                    "A. 引發極端天氣",
+                    "B. 引發水災*",
+                    "C. 產生大量二氧化碳",
+                    "D. 影響食水供應"
+                ];
+
+                try {
+                    const blob = await createWordDocxBlob(sampleLines);
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = '下載評估範本Word檔.docx';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    showToast("已下載 Word 評估範本檔 (.docx)！", "success");
+                } catch (err) {
+                    console.error("Docx generation error:", err);
+                    showToast("無法生成 Word 範本檔", "error");
+                }
+            };
+
+            // Word Doc Upload Parser
+            const handleWordFileUpload = (e, isCoop = false) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                if (isCoop) setCoopDocxName(file.name);
+                else setDocxFileName(file.name);
+
+                const reader = new FileReader();
+                reader.onload = async (evt) => {
+                    try {
+                        let parsedData = null;
+                        if (file.name.endsWith('.docx')) {
+                            const arrayBuffer = evt.target.result;
+                            const result = await window.mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+                            parsedData = parseWordChallengeText(result.value);
+                        } else {
+                            const text = evt.target.result;
+                            parsedData = parseWordChallengeText(text);
+                        }
+
+                        if (isCoop) {
+                            setCoopData(parsedData);
+                        } else {
+                            setChallengeData(parsedData);
+                        }
+                        showToast(`成功解析範本！共 ${parsedData.questions.length} 題`, 'success');
+                    } catch (err) {
+                        console.error("Word file parse error:", err);
+                        showToast("文件解析失敗！", "error");
+                    }
+                };
+
+                if (file.name.endsWith('.docx')) {
+                    reader.readAsArrayBuffer(file);
+                } else {
+                    reader.readAsText(file, "UTF-8");
+                }
+            };
+
+            // Question Publish
+            const handlePublishQuestion = () => {
+                const promptText = questionText.trim() || getDefaultQuestionPrompt(selectedMode);
+                
+                let challengeContent = null;
+                if (selectedMode === 'CHALLENGE') {
+                    if (!challengeData || !challengeData.questions || challengeData.questions.length === 0) {
+                        showToast("請先上載並解析 Word 評估範本檔！", "error");
+                        return;
+                    }
+                    const seconds = (parseInt(challengeMinInput) || 0) * 60 + (parseInt(challengeSecInput) || 0);
+                    challengeContent = {
+                        title: challengeData.title,
+                        totalScore: challengeData.totalScore,
+                        questions: challengeData.questions,
+                        enableTimer: challengeEnableTimer,
+                        timeLimit: challengeEnableTimer ? (seconds > 0 ? seconds : 120) : null,
+                        releaseInstant: challengeReleaseInstant,
+                        scoresReleased: challengeReleaseInstant
+                    };
+                }
+
+                const newQ = {
+                    id: 'q_' + Date.now(),
+                    mode: selectedMode,
+                    text: selectedMode === 'CHALLENGE' ? `🏆 挑戰題：${challengeData.title}` : promptText,
+                    startTime: Date.now(),
+                    lockAfterSubmit: lockAfterSubmit,
+                    whiteboardBg: selectedMode === 'DRAW' ? whiteboardBg : null,
+                    pushedUrl: selectedMode === 'LINK' ? pushedUrl : null,
+                    youtubeEmbed: selectedMode === 'LINK' ? extractYouTubeEmbed(pushedUrl) : null,
+                    choiceOptions: selectedMode === 'CHOICE' ? (choiceCount === 4 ? ['A', 'B', 'C', 'D'] : ['A', 'B', 'C', 'D', 'E']) : 
+                                   selectedMode === 'TF' ? ['正確 (O)', '錯誤 (X)'] : [],
+                    challenge: challengeContent
+                };
+
+                const updatedHistory = [...historyQuestions, newQ];
+                setHistoryQuestions(updatedHistory);
+                setActiveQuestion(newQ);
+
+                updateRoomInFirestore({
+                    activeQuestion: newQ,
+                    history: updatedHistory
+                });
+
+                showToast(`已成功發佈【${getModeLabel(selectedMode)}】！`, 'success');
+            };
+
+            // Challenge Release Scores
+            const handleReleaseChallengeScores = async () => {
+                if (!activeQuestion || activeQuestion.mode !== 'CHALLENGE') return;
+                const updatedQ = {
+                    ...activeQuestion,
+                    challenge: {
+                        ...activeQuestion.challenge,
+                        scoresReleased: true
+                    }
+                };
+                setActiveQuestion(updatedQ);
+                await updateRoomInFirestore({ activeQuestion: updatedQ });
+                showToast("已成功一併發放全班挑戰題成績！", "success");
+            };
+
+            // CSV Export for Challenge results
+            const handleExportChallengeCSV = () => {
+                if (!activeQuestion || activeQuestion.mode !== 'CHALLENGE') {
+                    showToast("此功能僅適用於挑戰題！", "error");
+                    return;
+                }
+
+                const questions = activeQuestion.challenge.questions || [];
+                let csv = `學號,姓名,總分,正確率,作答用時(秒)`;
+                questions.forEach((q, idx) => {
+                    csv += `,第${idx + 1}題學生答案,第${idx + 1}題是否正確`;
+                });
+                csv += `\n`;
+
+                studentsList.sort((a,b) => a.seatNumber - b.seatNumber).forEach(s => {
+                    const res = currentQuestionResponses[s.id];
+                    if (res) {
+                        const totalQs = questions.length;
+                        let correctCount = 0;
+                        const userAns = res.challengeAnswers || {};
+                        
+                        questions.forEach((q) => {
+                            if (userAns[q.num] === q.answer) correctCount++;
+                        });
+
+                        const accuracy = totalQs > 0 ? Math.round((correctCount / totalQs) * 100) : 0;
+                        const score = res.score || 0;
+                        const duration = res.durationSec || 0;
+
+                        csv += `${s.seatNumber},"${s.name}",${score},${accuracy}%,${duration}`;
+                        questions.forEach((q) => {
+                            const ans = userAns[q.num] || '未答';
+                            const isCorr = ans === q.answer ? '對' : '錯';
+                            csv += `,"${ans}",${isCorr}`;
+                        });
+                        csv += `\n`;
+                    } else {
+                        csv += `${s.seatNumber},"${s.name}",未交,0%,0`;
+                        questions.forEach(() => { csv += `,"未交",錯`; });
+                        csv += `\n`;
+                    }
+                });
+
+                const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `挑戰題成績表_房號${roomCode}_${Date.now()}.csv`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                showToast("已成功匯出挑戰題成績試算表 (.csv)！", "success");
+            };
+
+            // Random Selector
+            const triggerRandomSelector = () => {
+                const totalAvailable = [];
+                for (let i = rangeStart; i <= rangeEnd; i++) {
+                    if (!drawnNumbers.includes(i)) totalAvailable.push(i);
+                }
+
+                if (totalAvailable.length === 0) {
+                    showToast("此範圍內學號已全部抽完，將重新開始！", "info");
+                    setDrawnNumbers([]);
+                    return;
+                }
+
+                setIsSpinning(true);
+                let speed = 50;
+                let counter = 0;
+                
+                const spinInterval = setInterval(() => {
+                    const randIndex = Math.floor(Math.random() * totalAvailable.length);
+                    setCurrentDrawn(totalAvailable[randIndex]);
+                    playSound('spin');
+                    counter++;
+                    if (counter > 20) {
+                        clearInterval(spinInterval);
+                        const finalWinner = totalAvailable[Math.floor(Math.random() * totalAvailable.length)];
+                        setCurrentDrawn(finalWinner);
+                        setDrawnNumbers(prev => [...prev, finalWinner]);
+                        setIsSpinning(false);
+                        playSound('win');
+                    }
+                }, speed);
+            };
+
+            const handleStartCoopGrouping = () => {
+                if (!coopData || !coopData.questions || coopData.questions.length === 0) {
+                    showToast("請先上載並解析 Word 評估範本檔！", "error");
+                    return;
+                }
+
+                if (studentsList.length < 3) {
+                    showToast("在線學生人數不足！合作題必須最少 3 人一組作答。", "error");
+                }
+
+                // Random grouping into 3-4 persons per group
+                const shuffledStudents = [...studentsList].sort(() => Math.random() - 0.5);
+                const numStudents = shuffledStudents.length;
+                let groupCount = Math.max(1, Math.floor(numStudents / 3));
+
+                const groupShuffledAnimals = [...ANIMAL_GROUPS].sort(() => Math.random() - 0.5);
+                const createdGroups = [];
+
+                for (let i = 0; i < groupCount; i++) {
+                    const animal = groupShuffledAnimals[i % groupShuffledAnimals.length];
+                    createdGroups.push({
+                        id: 'grp_' + i,
+                        name: animal.name,
+                        emoji: animal.emoji,
+                        color: animal.color,
+                        bgLight: animal.bgLight,
+                        members: [],
+                        progress: 0
+                    });
+                }
+
+                // Distribute students evenly
+                shuffledStudents.forEach((student, idx) => {
+                    const targetGroupIndex = idx % createdGroups.length;
+                    createdGroups[targetGroupIndex].members.push({
+                        studentId: student.id,
+                        seatNumber: student.seatNumber,
+                        name: student.name
+                    });
+                });
+
+                setCoopGroups(createdGroups);
+                setCoopStage('GROUP');
+
+                const gamePayload = {
+                    stage: 'GROUP',
+                    questions: coopData.questions,
+                    groups: createdGroups,
+                    winnerGroup: null
+                };
+
+                setCoopGameState(gamePayload);
+                updateRoomInFirestore({ coopGameState: gamePayload });
+                showToast("已完成隨機分組並發送分組資訊至學生頁面！", "success");
+            };
+
+            const handleStartCoopRace = () => {
+                const updatedPayload = {
+                    ...coopGameState,
+                    stage: 'RACE',
+                    winnerGroup: null
+                };
+                setCoopStage('RACE');
+                setCoopGameState(updatedPayload);
+                updateRoomInFirestore({ coopGameState: updatedPayload });
+                showToast("合作題比賽正式開始！🚀", "success");
+            };
+
+            const handleResetCoopRace = () => {
+                const resetGroups = coopGroups.map(g => ({ ...g, progress: 0 }));
+                setCoopGroups(resetGroups);
+                const updatedPayload = {
+                    ...coopGameState,
+                    stage: 'RACE',
+                    groups: resetGroups,
+                    winnerGroup: null
+                };
+                setCoopStage('RACE');
+                setCoopGameState(updatedPayload);
+                updateRoomInFirestore({ coopGameState: updatedPayload });
+                showToast("比賽已重新啟動！", "info");
+            };
+
+            const handleEndCoopGame = () => {
+                setCoopStage('PREPARE');
+                setCoopGameState(null);
+                updateRoomInFirestore({ coopGameState: null });
+                showToast("合作題已結束，返回預備階段。", "info");
+            };
+
+            return (
+                <div class="min-h-screen bg-slate-100 flex flex-col text-slate-800">
+                    {/* Top Navigation Header */}
+                    <header class="bg-indigo-900 text-white px-6 py-4 shadow-xl flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <span class="bg-indigo-600 px-3 py-1 rounded-xl text-xs font-black tracking-widest uppercase">TEACHER</span>
+                            <h1 class="text-xl font-black tracking-tight">宣道會陳元喜小學OMIT互動課堂</h1>
+                            <div class="bg-indigo-800 px-3 py-1 rounded-lg text-xs font-mono font-bold">
+                                房號：<span class="text-amber-300 text-base">{roomCode}</span>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center space-x-2">
+                            {/* QR Code & Online monitoring */}
+                            <button 
+                                onClick={() => setShowQRModal(true)}
+                                class="bg-indigo-700 hover:bg-indigo-600 px-3 py-2 rounded-xl text-xs font-bold flex items-center space-x-2 transition"
+                            >
+                                <span>📱 課堂 QR Code</span>
+                                <span class="bg-emerald-500 text-white px-2 py-0.5 rounded-full text-[10px] font-black">
+                                    {studentsList.length} 在線
+                                </span>
+                            </button>
+
+                            {/* Demo Whiteboard Button */}
+                            <button 
+                                onClick={() => setShowTeacherDemoBoard(true)}
+                                class="bg-purple-600 hover:bg-purple-500 px-3 py-2 rounded-xl text-xs font-bold flex items-center space-x-1 transition shadow-md"
+                            >
+                                <span>🎨 白板</span>
+                            </button>
+
+                            {/* Random Student Picker */}
+                            <button 
+                                onClick={() => setShowRandomModal(true)}
+                                class="bg-amber-500 hover:bg-amber-600 text-slate-900 px-3 py-2 rounded-xl text-xs font-black flex items-center space-x-1 transition shadow-md"
+                            >
+                                <span>🎲 抽選學生</span>
+                            </button>
+
+                            {/* Timer Tool */}
+                            <button 
+                                onClick={() => setShowTimerModal(true)}
+                                class="bg-cyan-600 hover:bg-cyan-500 px-3 py-2 rounded-xl text-xs font-bold flex items-center space-x-1 transition"
+                            >
+                                <span>⏱️ 計時器</span>
+                            </button>
+
+                            <button 
+                                onClick={handleExitRoom}
+                                class="bg-red-600 hover:bg-red-700 px-3 py-2 rounded-xl text-xs font-bold transition ml-2"
+                            >
+                                離場清空
+                            </button>
+                        </div>
+                    </header>
+
+                    {/* Main Work Area */}
+                    <main class="flex-grow p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl mx-auto w-full">
+                        {/* Left Control Panel: Question Dispatcher */}
+                        <div class="lg:col-span-5 space-y-6">
+                            <div class="bg-white rounded-3xl shadow-xl p-6 border border-slate-200 space-y-5">
+                                <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                                    <h2 class="text-base font-bold text-slate-800 flex items-center space-x-2">
+                                        <span>📢 發佈問題或內容</span>
+                                    </h2>
+                                    <span class="text-xs font-bold bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-lg">
+                                        {getModeLabel(selectedMode)}
+                                    </span>
+                                </div>
+
+                                {/* Question Mode Selector */}
+                                <div class="grid grid-cols-3 gap-2">
+                                    {[
+                                        { key: 'CHOICE', label: '選擇題', icon: '🔘' },
+                                        { key: 'TF', label: '是非題', icon: '⭕' },
+                                        { key: 'SHORT', label: '短答題', icon: '✍️' },
+                                        { key: 'DRAW', label: '白板題', icon: '🎨' },
+                                        { key: 'BUZZER', label: '搶答題', icon: '⚡' },
+                                        { key: 'AUDIO', label: '錄音題', icon: '🎙️' },
+                                        { key: 'CHALLENGE', label: '挑戰題', icon: '🏆' },
+                                        { key: 'COOP', label: '合作題', icon: '🤝' },
+                                        { key: 'LINK', label: '派送連結', icon: '🔗' }
+                                    ].map(m => (
+                                        <button 
+                                            key={m.key}
+                                            onClick={() => setSelectedMode(m.key)}
+                                            class={`p-2.5 rounded-2xl text-xs font-bold flex flex-col items-center justify-center space-y-1 transition border ${selectedMode === m.key ? 'bg-indigo-600 text-white border-indigo-600 shadow-md scale-102' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}
+                                        >
+                                            <span class="text-lg">{m.icon}</span>
+                                            <span>{m.label}</span>
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {/* Mode Specific Inputs */}
+                                {selectedMode === 'CHOICE' && (
+                                    <div class="flex items-center justify-between bg-slate-50 p-3 rounded-2xl border border-slate-200 text-xs">
+                                        <span class="font-bold text-slate-600">選項數量：</span>
+                                        <div class="flex space-x-2">
+                                            {[4, 5].map(n => (
+                                                <button 
+                                                    key={n}
+                                                    onClick={() => setChoiceCount(n)}
+                                                    class={`px-3 py-1.5 rounded-xl font-bold transition ${choiceCount === n ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 border'}`}
+                                                >
+                                                    {n} 項 ({n === 4 ? 'A-D' : 'A-E'})
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {selectedMode === 'LINK' && (
+                                    <div class="space-y-2">
+                                        <label class="text-xs font-bold text-slate-600">請輸入網址或 YouTube 影片連結：</label>
+                                        <input 
+                                            type="url" 
+                                            placeholder="https://www.youtube.com/watch?v=..."
+                                            value={pushedUrl}
+                                            onChange={(e) => setPushedUrl(e.target.value)}
+                                            class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-mono"
+                                        />
+                                    </div>
+                                )}
+
+                                {selectedMode === 'DRAW' && (
+                                    <div class="space-y-2">
+                                        <label class="text-xs font-bold text-slate-600">選擇畫布背景 (可選)：</label>
+                                        <input 
+                                            type="file" 
+                                            accept="image/*"
+                                            onChange={(e) => {
+                                                const file = e.target.files[0];
+                                                if (file) {
+                                                    const r = new FileReader();
+                                                    r.onload = (evt) => setWhiteboardBg(evt.target.result);
+                                                    r.readAsDataURL(file);
+                                                }
+                                            }}
+                                            class="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                                        />
+                                    </div>
+                                )}
+
+                                {selectedMode === 'CHALLENGE' && (
+                                    <div class="bg-amber-50/70 border border-amber-200 p-4 rounded-2xl space-y-4 text-xs">
+                                        <div class="flex items-center justify-between">
+                                            <h3 class="font-bold text-amber-900">🏆 挑戰題設定</h3>
+                                            <button 
+                                                onClick={handleDownloadChallengeTemplate}
+                                                class="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow transition"
+                                            >
+                                                📥 下載評估範本Word檔
+                                            </button>
+                                        </div>
+
+                                        <div>
+                                            <label class="font-bold text-slate-700 block mb-1">上載 Word / 文檔範本：</label>
+                                            <input 
+                                                type="file" 
+                                                accept=".docx,.txt"
+                                                onChange={(e) => handleWordFileUpload(e, false)}
+                                                class="block w-full text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:font-semibold file:bg-amber-100 file:text-amber-800"
+                                            />
+                                            {docxFileName && <p class="text-[10px] text-emerald-600 font-bold mt-1">已載入: {docxFileName}</p>}
+                                        </div>
+
+                                        {/* Timer Settings */}
+                                        <div class="space-y-2 pt-2 border-t border-amber-200/60">
+                                            <div class="flex items-center justify-between">
+                                                <span class="font-bold text-slate-700">限時模式：</span>
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={challengeEnableTimer} 
+                                                    onChange={(e) => setChallengeEnableTimer(e.target.checked)}
+                                                    class="w-4 h-4 text-indigo-600 rounded"
+                                                />
+                                            </div>
+
+                                            {challengeEnableTimer && (
+                                                <div class="space-y-2">
+                                                    <div class="flex space-x-1">
+                                                        {['1', '2', '3', '4', '5'].map(m => (
+                                                            <button 
+                                                                key={m}
+                                                                onClick={() => { setChallengeMinInput(`0${m}`); setChallengeSecInput('00'); }}
+                                                                class="px-2 py-1 bg-white border rounded-lg font-bold text-slate-600 hover:bg-amber-100"
+                                                            >
+                                                                {m}分鐘
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                    <div class="flex items-center space-x-2">
+                                                        <span class="text-slate-600">自訂時間 (分:秒)：</span>
+                                                        <input 
+                                                            type="text" 
+                                                            value={challengeMinInput} 
+                                                            onChange={(e) => setChallengeMinInput(e.target.value)}
+                                                            class="w-10 px-2 py-1 border rounded text-center font-mono font-bold"
+                                                        />
+                                                        <span>:</span>
+                                                        <input 
+                                                            type="text" 
+                                                            value={challengeSecInput} 
+                                                            onChange={(e) => setChallengeSecInput(e.target.value)}
+                                                            class="w-10 px-2 py-1 border rounded text-center font-mono font-bold"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Grade release toggle */}
+                                        <div class="space-y-1 pt-2 border-t border-amber-200/60">
+                                            <span class="font-bold text-slate-700 block">成績發放模式：</span>
+                                            <div class="space-y-1">
+                                                <label class="flex items-center space-x-2">
+                                                    <input 
+                                                        type="radio" 
+                                                        name="releaseMode" 
+                                                        checked={challengeReleaseInstant}
+                                                        onChange={() => setChallengeReleaseInstant(true)}
+                                                    />
+                                                    <span>提交後即時給予分數</span>
+                                                </label>
+                                                <label class="flex items-center space-x-2">
+                                                    <input 
+                                                        type="radio" 
+                                                        name="releaseMode" 
+                                                        checked={!challengeReleaseInstant}
+                                                        onChange={() => setChallengeReleaseInstant(false)}
+                                                    />
+                                                    <span>待所有學生完成提交後，由教師按鍵一併發放</span>
+                                                </label>
+                                            </div>
+                                        </div>
+
+                                        {/* Teacher Editor / Confirmation */}
+                                        {challengeData && (
+                                            <div class="bg-white p-3 rounded-xl border border-amber-300 space-y-3 max-h-60 overflow-y-auto">
+                                                <h4 class="font-extrabold text-slate-800 text-xs">教師編輯/確認評估內容：</h4>
+                                                <div>
+                                                    <label class="text-[10px] text-slate-500 font-bold">主題：</label>
+                                                    <input 
+                                                        type="text" 
+                                                        value={challengeData.title} 
+                                                        onChange={(e) => setChallengeData({ ...challengeData, title: e.target.value })}
+                                                        class="w-full px-2 py-1 border rounded text-xs font-bold"
+                                                    />
+                                                </div>
+
+                                                {challengeData.questions.map((q, idx) => (
+                                                    <div key={idx} class="p-2 border rounded-lg bg-slate-50 space-y-2 relative">
+                                                        <button 
+                                                            onClick={() => {
+                                                                const newQs = challengeData.questions.filter((_, i) => i !== idx);
+                                                                setChallengeData({ ...challengeData, questions: newQs });
+                                                            }}
+                                                            class="absolute top-2 right-2 text-red-500 font-bold hover:text-red-700 text-xs"
+                                                        >
+                                                            ✕ 刪除
+                                                        </button>
+
+                                                        <p class="font-bold text-indigo-700">第 {idx + 1} 題：</p>
+                                                        <input 
+                                                            type="text" 
+                                                            value={q.text} 
+                                                            onChange={(e) => {
+                                                                const newQs = [...challengeData.questions];
+                                                                newQs[idx].text = e.target.value;
+                                                                setChallengeData({ ...challengeData, questions: newQs });
+                                                            }}
+                                                            class="w-full px-2 py-1 border rounded text-xs"
+                                                        />
+
+                                                        <div class="grid grid-cols-2 gap-1">
+                                                            {q.options.map((opt, oIdx) => (
+                                                                <div key={oIdx} class="flex items-center space-x-1">
+                                                                    <span class="font-bold text-[10px]">{opt.letter}:</span>
+                                                                    <input 
+                                                                        type="text" 
+                                                                        value={opt.text} 
+                                                                        onChange={(e) => {
+                                                                            const newQs = [...challengeData.questions];
+                                                                            newQs[idx].options[oIdx].text = e.target.value;
+                                                                            setChallengeData({ ...challengeData, questions: newQs });
+                                                                        }}
+                                                                        class="w-full px-1.5 py-0.5 border rounded text-[10px]"
+                                                                    />
+                                                                </div>
+                                                            ))}
+                                                        </div>
+
+                                                        <div class="flex items-center space-x-2 pt-1">
+                                                            <span class="font-bold text-[10px] text-emerald-700">正確答案：</span>
+                                                            <select 
+                                                                value={q.answer}
+                                                                onChange={(e) => {
+                                                                    const newQs = [...challengeData.questions];
+                                                                    newQs[idx].answer = e.target.value;
+                                                                    setChallengeData({ ...challengeData, questions: newQs });
+                                                                }}
+                                                                class="px-2 py-0.5 border rounded font-bold text-xs"
+                                                            >
+                                                                {['A', 'B', 'C', 'D'].map(l => (
+                                                                    <option key={l} value={l}>{l}</option>
+                                                                ))}
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {selectedMode === 'COOP' && (
+                                    <div class="bg-emerald-50/80 border border-emerald-200 p-4 rounded-2xl space-y-4 text-xs">
+                                        <div class="flex items-center justify-between">
+                                            <h3 class="font-bold text-emerald-900">🤝 合作題 (預備 > 分組 > 比賽)</h3>
+                                            <button 
+                                                onClick={handleDownloadChallengeTemplate}
+                                                class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow transition"
+                                            >
+                                                📥 下載評估範本Word檔
+                                            </button>
+                                        </div>
+
+                                        {coopStage === 'PREPARE' && (
+                                            <div class="space-y-3">
+                                                <div>
+                                                    <label class="font-bold text-slate-700 block mb-1">1. 上載 Word / 文檔範本：</label>
+                                                    <input 
+                                                        type="file" 
+                                                        accept=".docx,.txt"
+                                                        onChange={(e) => handleWordFileUpload(e, true)}
+                                                        class="block w-full text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:font-semibold file:bg-emerald-100 file:text-emerald-800"
+                                                    />
+                                                    {coopDocxName && <p class="text-[10px] text-emerald-600 font-bold mt-1">已載入: {coopDocxName}</p>}
+                                                </div>
+
+                                                <button 
+                                                    onClick={handleStartCoopGrouping}
+                                                    class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl shadow-md transition"
+                                                >
+                                                    進入「分組」階段 (自動隨機平均分組) ➡️
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {coopStage === 'GROUP' && (
+                                            <div class="space-y-3">
+                                                <div class="flex items-center justify-between">
+                                                    <span class="font-bold text-slate-800">各組名單概覽：</span>
+                                                    <button 
+                                                        onClick={handleStartCoopGrouping}
+                                                        class="px-2 py-1 bg-amber-500 text-white font-bold rounded-lg hover:bg-amber-600"
+                                                    >
+                                                        🔄 重新分配
+                                                    </button>
+                                                </div>
+
+                                                <div class="space-y-2 max-h-48 overflow-y-auto">
+                                                    {coopGroups.map((grp) => (
+                                                        <div key={grp.id} class={`p-2.5 rounded-xl border ${grp.bgLight} space-y-1`}>
+                                                            <div class="flex items-center space-x-2 font-black text-xs">
+                                                                <span>{grp.emoji}</span>
+                                                                <span>{grp.name} ({grp.members.length}人)</span>
+                                                            </div>
+                                                            <div class="text-[11px] text-slate-600 font-medium">
+                                                                {grp.members.map(m => `${m.seatNumber}號 ${m.name}`).join('、 ')}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+
+                                                <button 
+                                                    onClick={handleStartCoopRace}
+                                                    class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-3 rounded-xl shadow-lg transition"
+                                                >
+                                                    🚀 開始比賽 (進入「比賽」階段)
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {coopStage === 'RACE' && (
+                                            <div class="space-y-3">
+                                                <div class="p-3 bg-white rounded-xl border border-emerald-300 space-y-2">
+                                                    <div class="flex items-center justify-between font-bold text-emerald-800">
+                                                        <span>🏁 合作題比賽進行中</span>
+                                                        <button 
+                                                            onClick={() => setCoopIsMuted(!coopIsMuted)}
+                                                            class="text-xs px-2 py-1 bg-slate-100 rounded"
+                                                        >
+                                                            {coopIsMuted ? '🔇 背景音樂已靜音' : '🔊 背景音樂播放中'}
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                <div class="flex space-x-2">
+                                                    <button 
+                                                        onClick={handleResetCoopRace}
+                                                        class="w-1/2 bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 rounded-xl"
+                                                    >
+                                                        再次比賽
+                                                    </button>
+                                                    <button 
+                                                        onClick={handleEndCoopGame}
+                                                        class="w-1/2 bg-slate-700 hover:bg-slate-800 text-white font-bold py-2 rounded-xl"
+                                                    >
+                                                        結束比賽
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Main Question Text Area */}
+                                {selectedMode !== 'COOP' && (
+                                    <div class="space-y-2">
+                                        <label class="text-xs font-bold text-slate-600">題目內容 (空白將套用預設提示)：</label>
+                                        <textarea 
+                                            rows="3"
+                                            placeholder={getDefaultQuestionPrompt(selectedMode)}
+                                            value={questionText}
+                                            onChange={(e) => setQuestionText(e.target.value)}
+                                            class="w-full px-4 py-3 rounded-2xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-medium"
+                                        />
+                                    </div>
+                                )}
+
+                                {selectedMode !== 'COOP' && (
+                                    <button 
+                                        onClick={handlePublishQuestion}
+                                        class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-4 rounded-2xl transition shadow-lg shadow-indigo-200 active:scale-98 flex items-center justify-center space-x-2 text-base"
+                                    >
+                                        <span>🚀 即時發佈問題至全班學生</span>
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Right Display Area: Leaderboard & Response Monitoring */}
+                        <div class="lg:col-span-7 space-y-6">
+                            {/* Current Active Question Header Banner */}
+                            {activeQuestion && (
+                                <div class="bg-indigo-900 text-white p-5 rounded-3xl shadow-xl space-y-3 relative overflow-hidden">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center space-x-2">
+                                            <span class="bg-indigo-600 px-3 py-1 rounded-xl text-xs font-bold">
+                                                {getModeLabel(activeQuestion.mode)}
+                                            </span>
+                                            <span class="text-xs text-indigo-200">發佈時間: {new Date(activeQuestion.startTime).toLocaleTimeString()}</span>
+                                        </div>
+
+                                        <div class="flex items-center space-x-2">
+                                            {activeQuestion.mode === 'CHALLENGE' && !activeQuestion.challenge?.scoresReleased && (
+                                                <button 
+                                                    onClick={handleReleaseChallengeScores}
+                                                    class="bg-amber-500 hover:bg-amber-600 text-slate-900 px-3 py-1.5 rounded-xl font-black text-xs shadow-md animate-pulse"
+                                                >
+                                                    📢 一併發放全班挑戰題成績
+                                                </button>
+                                            )}
+
+                                            {activeQuestion.mode === 'CHALLENGE' && (
+                                                <button 
+                                                    onClick={handleExportChallengeCSV}
+                                                    class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-xl font-bold text-xs shadow"
+                                                >
+                                                    📥 匯出本次挑戰題成績試算表 (.csv)
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <h3 class="text-lg font-black">{activeQuestion.text}</h3>
+
+                                    {/* Link Mode YouTube Preview */}
+                                    {activeQuestion.youtubeEmbed && (
+                                        <div class="aspect-16-9 w-full rounded-2xl overflow-hidden shadow-2xl border-2 border-indigo-700 mt-2">
+                                            <iframe 
+                                                src={activeQuestion.youtubeEmbed} 
+                                                class="w-full h-full" 
+                                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                                                allowFullScreen
+                                            />
+                                        </div>
+                                    )}
+
+                                    {activeQuestion.pushedUrl && !activeQuestion.youtubeEmbed && (
+                                        <div class="pt-2">
+                                            <a 
+                                                href={activeQuestion.pushedUrl} 
+                                                target="_blank" 
+                                                rel="noreferrer"
+                                                class="inline-flex items-center space-x-2 bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-2.5 rounded-xl font-extrabold text-sm shadow-md"
+                                            >
+                                                <span>開啟連結網站 ↗</span>
+                                            </a>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Cooperative Questions Race Monitor */}
+                            {coopGameState && coopGameState.stage === 'RACE' && (
+                                <div class="bg-white rounded-3xl shadow-xl p-6 border border-slate-200 space-y-4">
+                                    <h3 class="text-base font-extrabold text-slate-800 flex items-center space-x-2">
+                                        <span>🏁 合作題隊伍比賽進度</span>
+                                    </h3>
+
+                                    <div class="space-y-4">
+                                        {coopGameState.groups.map((grp) => {
+                                            const totalQs = coopGameState.questions?.length || 5;
+                                            const progressPct = Math.min(100, Math.round((grp.progress / totalQs) * 100));
+
+                                            return (
+                                                <div key={grp.id} class="space-y-1.5">
+                                                    <div class="flex items-center justify-between text-xs font-bold">
+                                                        <span class="flex items-center space-x-1">
+                                                            <span>{grp.emoji}</span>
+                                                            <span>{grp.name}</span>
+                                                        </span>
+                                                        <span>第 {grp.progress} / {totalQs} 題 ({progressPct}%)</span>
+                                                    </div>
+
+                                                    <div class="w-full h-6 bg-slate-100 rounded-full overflow-hidden p-1 border border-slate-200 relative">
+                                                        <div 
+                                                            class={`h-full rounded-full transition-all duration-500 ${grp.color}`}
+                                                            style={{ width: `${progressPct}%` }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Main Leaderboard Panel */}
+                            <div class="bg-white rounded-3xl shadow-xl p-6 border border-slate-200 space-y-6">
+                                <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                                    <div>
+                                        <h2 class="text-lg font-black text-slate-800">🏆 答題龍虎榜</h2>
+                                        <p class="text-xs text-slate-400">順次序顯示作答答案、用時與名次 (頭三名加大顯示)</p>
+                                    </div>
+
+                                    <div class="text-right">
+                                        <span class="text-2xl font-black text-indigo-600">{leaderboardList.length}</span>
+                                        <span class="text-xs text-slate-400 font-medium"> / {studentsList.length} 已提交</span>
+                                    </div>
+                                </div>
+
+                                {/* Buzzer Lock Banner */}
+                                {activeQuestion?.mode === 'BUZZER' && leaderboardList.length > 0 && (
+                                    <div class="bg-amber-500 text-slate-900 p-4 rounded-2xl shadow-xl border-2 border-amber-300 text-center space-y-1 animate-pulse">
+                                        <span class="text-xs font-black uppercase tracking-widest">⚡ 搶答成功最快按制位</span>
+                                        <h3 class="text-2xl font-black">{leaderboardList[0].seatNumber}號 {leaderboardList[0].name}</h3>
+                                        <p class="text-xs font-mono font-bold">精確按制時間：{leaderboardList[0].submitTime} ({leaderboardList[0].durationSec}秒)</p>
+                                    </div>
+                                )}
+
+                                {/* Bar Chart breakdown for Choice & TF questions */}
+                                {(activeQuestion?.mode === 'CHOICE' || activeQuestion?.mode === 'TF') && (
+                                    <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+                                        <h3 class="text-xs font-bold text-slate-600 uppercase tracking-wider">全班選擇統計 (點選棒形圖檢視名單)：</h3>
+                                        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                            {activeQuestion.choiceOptions.map((opt) => {
+                                                const matches = leaderboardList.filter(r => r.answer === opt);
+                                                const pct = leaderboardList.length > 0 ? Math.round((matches.length / leaderboardList.length) * 100) : 0;
+
+                                                return (
+                                                    <button 
+                                                        key={opt}
+                                                        onClick={() => setBarChoiceFilter(opt)}
+                                                        class={`p-3 rounded-2xl border text-left transition ${barChoiceFilter === opt ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300'}`}
+                                                    >
+                                                        <div class="flex items-center justify-between font-bold text-sm mb-1">
+                                                            <span>選項 {opt}</span>
+                                                            <span>{matches.length}人 ({pct}%)</span>
+                                                        </div>
+                                                        <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                                                            <div class="bg-indigo-500 h-full rounded-full" style={{ width: `${pct}%` }}></div>
+                                                        </div>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+
+                                        {barChoiceFilter && (
+                                            <div class="mt-3 p-3 bg-indigo-50 rounded-xl border border-indigo-200 space-y-1">
+                                                <div class="flex items-center justify-between">
+                                                    <span class="text-xs font-extrabold text-indigo-900">選擇「{barChoiceFilter}」的學生名單：</span>
+                                                    <button onClick={() => setBarChoiceFilter(null)} class="text-xs text-indigo-600 font-bold">關閉</button>
+                                                </div>
+                                                <p class="text-xs text-indigo-800 font-medium">
+                                                    {leaderboardList.filter(r => r.answer === barChoiceFilter).map(r => `${r.seatNumber}號 ${r.name}`).join('、 ') || '暫無學生選擇此項'}
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Leaderboard Cards Grid */}
+                                <div class="space-y-4">
+                                    {/* Top 3 Enlarged Podium Display */}
+                                    {leaderboardList.slice(0, 3).length > 0 && (
+                                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                            {leaderboardList.slice(0, 3).map((res, index) => {
+                                                const medals = ['🥇 金牌 (第1名)', '🥈 銀牌 (第2名)', '🥉 銅牌 (第3名)'];
+                                                const borderColors = ['border-amber-400 bg-amber-50/50 gold-trophy', 'border-slate-300 bg-slate-50', 'border-amber-700/30 bg-amber-900/5'];
+
+                                                return (
+                                                    <div 
+                                                        key={res.studentId}
+                                                        onClick={() => setShowInspectModal(res)}
+                                                        class={`p-4 rounded-3xl border-2 shadow-lg space-y-2 cursor-pointer hover:scale-102 transition ${borderColors[index]}`}
+                                                    >
+                                                        <div class="flex items-center justify-between">
+                                                            <span class="text-xs font-black text-amber-700">{medals[index]}</span>
+                                                            <span class="text-[10px] font-mono text-slate-500">{res.submitTime}</span>
+                                                        </div>
+                                                        <div class="flex items-center justify-between">
+                                                            <h4 class="text-base font-extrabold text-slate-800">{res.seatNumber}號 {res.name}</h4>
+                                                            <span class="text-xs font-mono font-bold text-indigo-600">用時: {res.durationSec}s</span>
+                                                        </div>
+
+                                                        {/* Answer Summary */}
+                                                        <div class="pt-2 border-t border-slate-200 text-xs font-bold text-slate-700">
+                                                            {activeQuestion?.mode === 'DRAW' && res.answer?.startsWith('data:image') ? (
+                                                                <img src={res.answer} class="w-full h-24 object-contain rounded-xl bg-white border" />
+                                                            ) : activeQuestion?.mode === 'AUDIO' ? (
+                                                                <audio src={res.answer} controls class="w-full h-8" />
+                                                            ) : activeQuestion?.mode === 'CHALLENGE' ? (
+                                                                <div>
+                                                                    <span>得分: {res.score}分</span>
+                                                                </div>
+                                                            ) : (
+                                                                <span class="line-clamp-2">{res.answer}</span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+
+                                    {/* Remaining Students Standard List */}
+                                    {leaderboardList.slice(3).length > 0 && (
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                                            {leaderboardList.slice(3).map((res, index) => (
+                                                <div 
+                                                    key={res.studentId}
+                                                    onClick={() => setShowInspectModal(res)}
+                                                    class="p-3 bg-slate-50 hover:bg-indigo-50/50 rounded-2xl border border-slate-200 flex items-center justify-between cursor-pointer transition text-xs"
+                                                >
+                                                    <div class="flex items-center space-x-3">
+                                                        <span class="w-6 h-6 rounded-full bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-[10px]">
+                                                            {index + 4}
+                                                        </span>
+                                                        <span class="font-bold text-slate-800">{res.seatNumber}號 {res.name}</span>
+                                                    </div>
+
+                                                    <div class="text-right">
+                                                        <span class="font-mono text-slate-500 font-medium">{res.submitTime}</span>
+                                                        <p class="font-bold text-indigo-600">
+                                                            {activeQuestion?.mode === 'DRAW' ? '🎨 白板畫作' : 
+                                                             activeQuestion?.mode === 'AUDIO' ? '🎙️ 語音檔' : 
+                                                             activeQuestion?.mode === 'CHALLENGE' ? `${res.score}分` : res.answer}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </main>
+
+                    {/* Teacher Whiteboard Modal */}
+                    {showTeacherDemoBoard && (
+                        <TeacherWhiteboardModal 
+                            onClose={() => setShowTeacherDemoBoard(false)}
+                            isBroadcasting={isBroadcastingTeacherBoard}
+                            onBroadcast={async (dataUrl) => {
+                                setIsBroadcastingTeacherBoard(!!dataUrl);
+                                updateRoomInFirestore({ teacherDemoWhiteboard: dataUrl });
+                            }}
+                            roomCode={roomCode}
+                        />
+                    )}
+
+                    {/* Inspect Student Submission & Broadcast Modal */}
+                    {showInspectModal && (
+                        <div class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                            <div class="bg-white rounded-3xl p-6 max-w-2xl w-full space-y-4 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+                                <div class="flex items-center justify-between border-b pb-3">
+                                    <h3 class="text-lg font-black text-slate-800">
+                                        檢視學生作答：{showInspectModal.seatNumber}號 {showInspectModal.name}
+                                    </h3>
+                                    <button onClick={() => setShowInspectModal(null)} class="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
+                                </div>
+
+                                <div class="space-y-3">
+                                    <p class="text-xs font-bold text-slate-500">提交時間: {showInspectModal.submitTime} | 耗時: {showInspectModal.durationSec} 秒</p>
+
+                                    {activeQuestion?.mode === 'DRAW' && showInspectModal.answer?.startsWith('data:image') ? (
+                                        <img src={showInspectModal.answer} class="w-full aspect-16-9 object-contain bg-white rounded-2xl border-2" />
+                                    ) : activeQuestion?.mode === 'AUDIO' ? (
+                                        <audio src={showInspectModal.answer} controls class="w-full" />
+                                    ) : activeQuestion?.mode === 'CHALLENGE' ? (
+                                        <div class="space-y-2 text-xs">
+                                            <p class="font-bold text-indigo-700">總分數：{showInspectModal.score} 分</p>
+                                            {activeQuestion.challenge.questions.map((q) => {
+                                                const uAns = showInspectModal.challengeAnswers?.[q.num];
+                                                const isCorr = uAns === q.answer;
+                                                return (
+                                                    <div key={q.num} class={`p-2 rounded-xl border ${isCorr ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+                                                        <p class="font-bold">{q.num}. {q.text}</p>
+                                                        <p>學生選擇: <span class={isCorr ? 'text-emerald-700 font-bold' : 'text-red-600 font-bold'}>{uAns || '未選擇'}</span></p>
+                                                        {!isCorr && <p class="text-emerald-700 font-bold">正確答案: {q.answer}</p>}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    ) : (
+                                        <div class="p-4 bg-slate-50 rounded-2xl border text-sm font-bold text-slate-800">
+                                            {showInspectModal.answer}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div class="flex items-center justify-between pt-3 border-t">
+                                    <button 
+                                        onClick={async () => {
+                                            updateRoomInFirestore({ broadcastedStudentWork: showInspectModal });
+                                            showToast("已廣播至全班學生螢幕進行互評！", "success");
+                                        }}
+                                        class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-md"
+                                    >
+                                        📡 一鍵廣播至全班螢幕 (互評)
+                                    </button>
+
+                                    <button 
+                                        onClick={async () => {
+                                            updateRoomInFirestore({ broadcastedStudentWork: null });
+                                            showToast("已取消廣播！", "info");
+                                        }}
+                                        class="px-5 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl text-xs"
+                                    >
+                                        🚫 取消廣播
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* QR Code Modal */}
+                    {showQRModal && (
+                        <div class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                            <div class="bg-white rounded-3xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl">
+                                <h3 class="text-lg font-black text-slate-800">課堂專屬 QR Code</h3>
+                                <img src={qrImageUrl} class="w-48 h-48 mx-auto border-4 border-indigo-100 rounded-2xl shadow" />
+                                <p class="text-xs font-mono font-bold text-indigo-600">房號：{roomCode}</p>
+
+                                <div class="bg-indigo-50 p-3 rounded-2xl text-left space-y-2 max-h-40 overflow-y-auto">
+                                    <p class="text-xs font-bold text-indigo-900">實時在線學生 ({studentsList.length}人)：</p>
+                                    <div class="grid grid-cols-2 gap-1 text-[11px] text-indigo-800">
+                                        {studentsList.map(s => (
+                                            <div key={s.id} class="truncate">
+                                                • {s.seatNumber}號 {s.name}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <button onClick={() => setShowQRModal(false)} class="w-full py-2.5 bg-slate-800 text-white rounded-xl font-bold text-xs">
+                                    關閉
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Random Selector Modal */}
+                    {showRandomModal && (
+                        <div class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                            <div class="bg-white rounded-3xl p-6 max-w-md w-full space-y-5 shadow-2xl text-center">
+                                <h3 class="text-lg font-black text-slate-800">🎲 抽選學生 (自訂學號範圍)</h3>
+
+                                <div class="flex items-center justify-center space-x-3 text-xs font-bold">
+                                    <span>範圍：</span>
+                                    <input 
+                                        type="number" 
+                                        value={rangeStart} 
+                                        onChange={(e) => setRangeStart(parseInt(e.target.value) || 1)}
+                                        class="w-16 px-2 py-1 border rounded-lg text-center"
+                                    />
+                                    <span>至</span>
+                                    <input 
+                                        type="number" 
+                                        value={rangeEnd} 
+                                        onChange={(e) => setRangeEnd(parseInt(e.target.value) || 36)}
+                                        class="w-16 px-2 py-1 border rounded-lg text-center"
+                                    />
+                                </div>
+
+                                <div class="py-8 bg-indigo-50 rounded-3xl border-2 border-indigo-200">
+                                    <span class="text-6xl font-black text-indigo-600 tracking-widest">
+                                        {currentDrawn !== null ? `${currentDrawn} 號` : '❓'}
+                                    </span>
+                                </div>
+
+                                <button 
+                                    onClick={triggerRandomSelector}
+                                    disabled={isSpinning}
+                                    class="w-full py-3.5 bg-amber-500 hover:bg-amber-600 text-slate-900 font-black rounded-2xl shadow-lg transition active:scale-98"
+                                >
+                                    {isSpinning ? '滾動中...' : '🎯 隨機抽籤'}
+                                </button>
+
+                                <button onClick={() => setShowRandomModal(false)} class="text-xs text-slate-400 font-bold">
+                                    關閉
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Timer Modal */}
+                    {showTimerModal && (
+                        <div class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                            <div class={`bg-white rounded-3xl p-6 transition-all duration-300 shadow-2xl text-center space-y-5 ${timerZoomed ? 'max-w-2xl w-full py-12' : 'max-w-md w-full'}`}>
+                                <div class="flex items-center justify-between">
+                                    <h3 class="text-lg font-black text-slate-800">⏱️ 計時器工具</h3>
+                                    <button onClick={() => setTimerZoomed(!timerZoomed)} class="text-xs px-3 py-1 bg-slate-100 rounded-lg font-bold">
+                                        {timerZoomed ? '縮小' : '🔍 放大顯示'}
+                                    </button>
+                                </div>
+
+                                <div class="py-6 bg-slate-900 text-emerald-400 rounded-3xl font-mono font-black text-5xl md:text-6xl tracking-wider shadow-inner">
+                                    {String(Math.floor(timerSeconds / 60)).padStart(2, '0')}:{String(timerSeconds % 60).padStart(2, '0')}
+                                </div>
+
+                                <div class="grid grid-cols-3 gap-2 text-xs font-bold">
+                                    {[30, 60, 120, 180, 240, 300].map(sec => (
+                                        <button 
+                                            key={sec}
+                                            onClick={() => { setTimerSeconds(sec); setTimerActive(false); }}
+                                            class="py-2 bg-slate-100 hover:bg-indigo-50 rounded-xl"
+                                        >
+                                            {sec < 60 ? `${sec}秒` : `${sec/60}分鐘`}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                <div class="flex items-center justify-center space-x-2 text-xs font-bold">
+                                    <span>手動輸入 (分:秒)：</span>
+                                    <input 
+                                        type="text" 
+                                        value={customTimerMin} 
+                                        onChange={(e) => setCustomTimerMin(e.target.value)}
+                                        class="w-12 px-2 py-1 border rounded text-center font-mono"
+                                    />
+                                    <span>:</span>
+                                    <input 
+                                        type="text" 
+                                        value={customTimerSec} 
+                                        onChange={(e) => setCustomTimerSec(e.target.value)}
+                                        class="w-12 px-2 py-1 border rounded text-center font-mono"
+                                    />
+                                    <button 
+                                        onClick={() => {
+                                            const total = (parseInt(customTimerMin) || 0) * 60 + (parseInt(customTimerSec) || 0);
+                                            setTimerSeconds(total);
+                                            setTimerActive(false);
+                                        }}
+                                        class="px-3 py-1 bg-indigo-600 text-white rounded-lg"
+                                    >
+                                        設定
+                                    </button>
+                                </div>
+
+                                <div class="flex space-x-2">
+                                    <button 
+                                        onClick={() => setTimerActive(!timerActive)}
+                                        class={`w-1/2 py-3 rounded-xl font-black text-white ${timerActive ? 'bg-amber-500' : 'bg-emerald-600'}`}
+                                    >
+                                        {timerActive ? '⏸️ 暫停' : '▶️ 開始倒數'}
+                                    </button>
+                                    <button 
+                                        onClick={() => { setTimerActive(false); setTimerSeconds(0); }}
+                                        class="w-1/2 py-3 bg-slate-200 text-slate-700 rounded-xl font-bold"
+                                    >
+                                        清空
+                                    </button>
+                                </div>
+
+                                <button onClick={() => setShowTimerModal(false)} class="text-xs text-slate-400 font-bold block mx-auto">
+                                    關閉
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function StudentInterface({ roomCode, studentName, seatNumber, studentId, activeQuestion, responses, studentsList, teacherDemoWhiteboard, broadcastedStudentWork, coopGameState, showToast, onExit }) {
+            const [myAnswer, setMyAnswer] = useState('');
+            const [submitted, setSubmitted] = useState(false);
+            const [isRecording, setIsRecording] = useState(false);
+            const [recordedAudioUrl, setRecordedAudioUrl] = useState(null);
+            const mediaRecorderRef = useRef(null);
+            const audioChunksRef = useRef([]);
+
+            // Challenge Mode answers state
+            const [challengeAnswers, setChallengeAnswers] = useState({});
+            const [remainingChallengeTime, setRemainingChallengeTime] = useState(null);
+
+            const mySubmission = useMemo(() => {
+                if (!activeQuestion) return null;
+                return responses[studentId] && responses[studentId].questionId === activeQuestion.id ? responses[studentId] : null;
+            }, [responses, activeQuestion, studentId]);
+
+            // Cooperative student group lookup
+            const myCoopGroup = useMemo(() => {
+                if (!coopGameState || !coopGameState.groups) return null;
+                return coopGameState.groups.find(g => g.members.some(m => m.studentId === studentId));
+            }, [coopGameState, studentId]);
+
+            const myCoopRoleIndex = useMemo(() => {
+                if (!myCoopGroup) return 0;
+                return myCoopGroup.members.findIndex(m => m.studentId === studentId);
+            }, [myCoopGroup, studentId]);
+
+            // Challenge Question Timer for Student
+            useEffect(() => {
+                if (activeQuestion?.mode === 'CHALLENGE' && activeQuestion.challenge?.timeLimit) {
+                    const elapsed = Math.floor((Date.now() - activeQuestion.startTime) / 1000);
+                    const left = Math.max(0, activeQuestion.challenge.timeLimit - elapsed);
+                    setRemainingChallengeTime(left);
+
+                    const timer = setInterval(() => {
+                        setRemainingChallengeTime(prev => {
+                            if (prev <= 1) {
+                                clearInterval(timer);
+                                // Auto submit challenge at 00:00
+                                if (!submitted) {
+                                    handleChallengeSubmitAuto();
+                                }
+                                return 0;
+                            }
+                            return prev - 1;
+                        });
+                    }, 1000);
+
+                    return () => clearInterval(timer);
+                }
+            }, [activeQuestion]);
+
+            // Auto submit challenge on timeout
+            const handleChallengeSubmitAuto = () => {
+                const questions = activeQuestion.challenge.questions || [];
+                let correctCount = 0;
+                let totalScore = activeQuestion.challenge.totalScore || 100;
+                const scorePerQ = totalScore / questions.length;
+
+                questions.forEach((q) => {
+                    if (challengeAnswers[q.num] === q.answer) correctCount++;
+                });
+
+                const finalScore = Math.round(correctCount * scorePerQ);
+                const duration = Math.floor((Date.now() - activeQuestion.startTime) / 1000);
+
+                const resObj = {
+                    studentId,
+                    seatNumber,
+                    name: studentName || `${seatNumber}號學生`,
+                    questionId: activeQuestion.id,
+                    challengeAnswers,
+                    score: finalScore,
+                    submitTime: new Date().toLocaleTimeString('zh-HK'),
+                    submitTimestamp: Date.now(),
+                    durationSec: duration
+                };
+
+                const appId = "omit-8c173";
+                const db = window.fbDb;
+                const docRef = window.fbUtils.doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode, 'responses', studentId);
+                window.fbUtils.setDoc(docRef, resObj);
+
+                setSubmitted(true);
+            };
+
+            // Audio Recording Logic
+            const startRecording = async () => {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    mediaRecorderRef.current = new MediaRecorder(stream);
+                    audioChunksRef.current = [];
+
+                    mediaRecorderRef.current.ondataavailable = (e) => {
+                        audioChunksRef.current.push(e.data);
+                    };
+
+                    mediaRecorderRef.current.onstop = () => {
+                        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            setRecordedAudioUrl(reader.result);
+                        };
+                        reader.readAsDataURL(blob);
+                    };
+
+                    mediaRecorderRef.current.start();
+                    setIsRecording(true);
+                } catch (err) {
+                    console.error("Mic error:", err);
+                    showToast("無法存取麥克風！", "error");
+                }
+            };
+
+            const stopRecording = () => {
+                if (mediaRecorderRef.current && isRecording) {
+                    mediaRecorderRef.current.stop();
+                    setIsRecording(false);
+                }
+            };
+
+            const handleSubmitResponse = (finalVal = null) => {
+                const answerToSubmit = finalVal || myAnswer || recordedAudioUrl;
+                if (!answerToSubmit && activeQuestion?.mode !== 'CHALLENGE') {
+                    showToast("請先選擇或填寫答案！", "error");
+                    return;
+                }
+
+                const duration = Math.floor((Date.now() - activeQuestion.startTime) / 1000);
+
+                const resObj = {
+                    studentId,
+                    seatNumber,
+                    name: studentName || `${seatNumber}號學生`,
+                    questionId: activeQuestion.id,
+                    answer: answerToSubmit,
+                    submitTime: new Date().toLocaleTimeString('zh-HK'),
+                    submitTimestamp: Date.now(),
+                    durationSec: duration
+                };
+
+                const appId = "omit-8c173";
+                const db = window.fbDb;
+                const docRef = window.fbUtils.doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode, 'responses', studentId);
+                window.fbUtils.setDoc(docRef, resObj);
+
+                setSubmitted(true);
+                playSound('win');
+            };
+
+            // Cooperative option selection handler
+            const handleCoopOptionClick = (chosenOption) => {
+                if (!coopGameState || coopGameState.stage !== 'RACE') return;
+
+                const currentGroup = coopGameState.groups.find(g => g.id === myCoopGroup.id);
+                const currentProg = currentGroup.progress;
+                const currentQ = coopGameState.questions[currentProg];
+
+                let newGroups = [...coopGameState.groups];
+                const targetIdx = newGroups.findIndex(g => g.id === myCoopGroup.id);
+
+                if (chosenOption === currentQ.answer) {
+                    // Correct!
+                    newGroups[targetIdx].progress += 1;
+                    playSound('win');
+
+                    let winner = null;
+                    if (newGroups[targetIdx].progress >= coopGameState.questions.length) {
+                        winner = newGroups[targetIdx];
+                    }
+
+                    const updatedPayload = {
+                        ...coopGameState,
+                        groups: newGroups,
+                        winnerGroup: winner
+                    };
+
+                    const appId = "omit-8c173";
+                    const db = window.fbDb;
+                    const roomDocRef = window.fbUtils.doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode);
+                    window.fbUtils.setDoc(roomDocRef, { coopGameState: updatedPayload }, { merge: true });
+                } else {
+                    // Wrong! Reset progress to 0
+                    playSound('alarm');
+                    showToast("答錯了！隊伍進度歸零重新開始！", "error");
+                    newGroups[targetIdx].progress = 0;
+
+                    const updatedPayload = {
+                        ...coopGameState,
+                        groups: newGroups
+                    };
+
+                    const appId = "omit-8c173";
+                    const db = window.fbDb;
+                    const roomDocRef = window.fbUtils.doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode);
+                    window.fbUtils.setDoc(roomDocRef, { coopGameState: updatedPayload }, { merge: true });
+                }
+            };
+
+            return (
+                <div class="min-h-screen bg-slate-100 flex flex-col text-slate-800">
+                    <header class="bg-indigo-900 text-white px-6 py-4 shadow-xl flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <span class="bg-emerald-500 text-white px-3 py-1 rounded-xl text-xs font-black">STUDENT</span>
+                            <h1 class="text-lg font-black">{seatNumber}號 {studentName}</h1>
+                        </div>
+                        <div class="text-xs font-mono bg-indigo-800 px-3 py-1 rounded-lg">
+                            房號: {roomCode}
+                        </div>
+                    </header>
+
+                    <main class="flex-grow p-4 md:p-6 max-w-3xl mx-auto w-full space-y-6">
+                        {/* Teacher Demo Board Broadcast Overlay */}
+                        {teacherDemoWhiteboard && (
+                            <div class="bg-purple-900 text-white p-5 rounded-3xl shadow-2xl space-y-3">
+                                <span class="bg-purple-600 px-3 py-1 rounded-full text-xs font-bold">🎨 教師即時白板示範</span>
+                                <img src={teacherDemoWhiteboard} class="w-full aspect-16-9 object-contain bg-white rounded-2xl border-2" />
+                            </div>
+                        )}
+
+                        {/* Broadcast Student Work Peer Evaluation */}
+                        {broadcastedStudentWork && (
+                            <div class="bg-amber-500 text-slate-900 p-5 rounded-3xl shadow-2xl space-y-3">
+                                <span class="bg-slate-900 text-white px-3 py-1 rounded-full text-xs font-bold">📡 全班廣播作品互評：{broadcastedStudentWork.seatNumber}號 {broadcastedStudentWork.name}</span>
+                                {broadcastedStudentWork.answer?.startsWith('data:image') ? (
+                                    <img src={broadcastedStudentWork.answer} class="w-full aspect-16-9 object-contain bg-white rounded-2xl border-2" />
+                                ) : (
+                                    <div class="p-4 bg-white rounded-2xl font-bold text-base">{broadcastedStudentWork.answer}</div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Cooperative Mode Display */}
+                        {coopGameState && coopGameState.stage === 'GROUP' && (
+                            <div class="bg-white rounded-3xl shadow-2xl p-8 text-center space-y-6 border-2 border-emerald-400">
+                                <span class="text-5xl">{myCoopGroup?.emoji || '🤝'}</span>
+                                <h2 class="text-2xl font-black text-slate-800">你的組別：{myCoopGroup?.name || '分組中...'}</h2>
+                                <div class="p-4 bg-emerald-50 rounded-2xl text-emerald-900 font-bold text-sm">
+                                    盡快與你的組員會合!比賽即將開始!
+                                </div>
+                            </div>
+                        )}
+
+                        {coopGameState && coopGameState.stage === 'RACE' && (
+                            <div class="bg-white rounded-3xl shadow-2xl p-6 space-y-6 border-2 border-indigo-500">
+                                <div class="flex items-center justify-between border-b pb-3">
+                                    <span class="font-extrabold text-indigo-700 text-sm">🤝 合作題 (第 {myCoopGroup?.progress + 1} / {coopGameState.questions.length} 題)</span>
+                                    <span class="font-black text-slate-800">{myCoopGroup?.name}</span>
+                                </div>
+
+                                {/* Split View based on student role index in group */}
+                                {coopGameState.questions[myCoopGroup?.progress] && (
+                                    <div class="space-y-4">
+                                        {/* Member 1 shows Question Text */}
+                                        {myCoopRoleIndex === 0 && (
+                                            <div class="p-6 bg-indigo-50 rounded-2xl space-y-3">
+                                                <span class="text-xs font-extrabold text-indigo-600">你的任務：讀出題目給組員！</span>
+                                                <h3 class="text-xl font-black text-slate-800">
+                                                    {coopGameState.questions[myCoopGroup.progress].text}
+                                                </h3>
+                                            </div>
+                                        )}
+
+                                        {/* Member 2 shows Option A & B */}
+                                        {myCoopRoleIndex === 1 && (
+                                            <div class="space-y-3">
+                                                <span class="text-xs font-extrabold text-indigo-600 block">你的任務：討論後點選選項 (A/B)！</span>
+                                                <div class="grid grid-cols-1 gap-3">
+                                                    {coopGameState.questions[myCoopGroup.progress].options.slice(0, 2).map(opt => (
+                                                        <button 
+                                                            key={opt.letter}
+                                                            onClick={() => handleCoopOptionClick(opt.letter)}
+                                                            class="p-4 bg-slate-50 hover:bg-indigo-600 hover:text-white rounded-2xl border-2 font-bold text-left transition text-base"
+                                                        >
+                                                            {opt.letter}. {opt.text}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Member 3 shows Option C & D */}
+                                        {myCoopRoleIndex >= 2 && (
+                                            <div class="space-y-3">
+                                                <span class="text-xs font-extrabold text-indigo-600 block">你的任務：討論後點選選項 (C/D)！</span>
+                                                <div class="grid grid-cols-1 gap-3">
+                                                    {coopGameState.questions[myCoopGroup.progress].options.slice(2, 4).map(opt => (
+                                                        <button 
+                                                            key={opt.letter}
+                                                            onClick={() => handleCoopOptionClick(opt.letter)}
+                                                            class="p-4 bg-slate-50 hover:bg-indigo-600 hover:text-white rounded-2xl border-2 font-bold text-left transition text-base"
+                                                        >
+                                                            {opt.letter}. {opt.text}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Standard Question View */}
+                        {activeQuestion && !coopGameState && (
+                            <div class="bg-white rounded-3xl shadow-xl p-6 border border-slate-200 space-y-6">
+                                <div class="flex items-center justify-between border-b pb-3">
+                                    <span class="bg-indigo-600 text-white px-3 py-1 rounded-xl text-xs font-bold">
+                                        {getModeLabel(activeQuestion.mode)}
+                                    </span>
+
+                                    {activeQuestion.mode === 'CHALLENGE' && remainingChallengeTime !== null && (
+                                        <span class="font-mono font-black text-red-600 text-base">
+                                            ⏱️ 限時倒數: {Math.floor(remainingChallengeTime / 60)}:{String(remainingChallengeTime % 60).padStart(2, '0')}
+                                        </span>
+                                    )}
+                                </div>
+
+                                <h2 class="text-lg font-black text-slate-800">{activeQuestion.text}</h2>
+
+                                {/* Submitted Praise Banner */}
+                                {(submitted || mySubmission) && (
+                                    <div class="p-6 bg-emerald-500 text-white rounded-3xl shadow-xl text-center space-y-2 animate-bounce">
+                                        <span class="text-3xl">🎉</span>
+                                        <h3 class="text-xl font-black">已提交答案! 讚賞你的努力!</h3>
+                                        <p class="text-xs font-bold">安靜等候老師指示...</p>
+                                    </div>
+                                )}
+
+                                {/* Choice / TF Button List */}
+                                {!submitted && !mySubmission && (activeQuestion.mode === 'CHOICE' || activeQuestion.mode === 'TF') && (
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        {activeQuestion.choiceOptions.map(opt => (
+                                            <button 
+                                                key={opt}
+                                                onClick={() => setMyAnswer(opt)}
+                                                class={`p-4 rounded-2xl border-2 font-black text-lg transition ${myAnswer === opt ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg scale-102' : 'bg-slate-50 text-slate-800 border-slate-200 hover:bg-slate-100'}`}
+                                            >
+                                                {opt}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* Short Answer Input */}
+                                {!submitted && !mySubmission && activeQuestion.mode === 'SHORT' && (
+                                    <textarea 
+                                        rows="4" 
+                                        placeholder="請輸入您的回答..."
+                                        value={myAnswer}
+                                        onChange={(e) => setMyAnswer(e.target.value)}
+                                        class="w-full p-4 border rounded-2xl text-sm font-medium focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                )}
+
+                                {/* Whiteboard Canvas */}
+                                {!submitted && !mySubmission && activeQuestion.mode === 'DRAW' && (
+                                    <WhiteboardCanvas initialImage={activeQuestion.whiteboardBg} onSave={setMyAnswer} />
+                                )}
+
+                                {/* Audio Recorder */}
+                                {!submitted && !mySubmission && activeQuestion.mode === 'AUDIO' && (
+                                    <div class="space-y-4 text-center">
+                                        {!recordedAudioUrl ? (
+                                            <button 
+                                                onClick={isRecording ? stopRecording : startRecording}
+                                                class={`px-8 py-4 rounded-full font-black text-white text-base shadow-xl transition ${isRecording ? 'bg-red-600 animate-pulse' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                                            >
+                                                {isRecording ? '⏹️ 結束錄音' : '🎙️ 開始錄音 (最多10秒)'}
+                                            </button>
+                                        ) : (
+                                            <div class="space-y-3 bg-slate-50 p-4 rounded-2xl border">
+                                                <audio src={recordedAudioUrl} controls class="w-full" />
+                                                <div class="flex justify-center space-x-3">
+                                                    <button onClick={() => setRecordedAudioUrl(null)} class="px-4 py-2 bg-red-600 text-white font-bold text-xs rounded-xl">
+                                                        🗑️ 刪除重錄
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Buzzer Button */}
+                                {!submitted && !mySubmission && activeQuestion.mode === 'BUZZER' && (
+                                    <button 
+                                        onClick={() => { playSound('buzzer'); handleSubmitResponse('搶答！'); }}
+                                        class="w-full py-16 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black text-4xl rounded-3xl shadow-2xl transition border-4 border-red-400"
+                                    >
+                                        ⚡ 點擊搶答！
+                                    </button>
+                                )}
+
+                                {/* Challenge Question Sheet */}
+                                {!submitted && !mySubmission && activeQuestion.mode === 'CHALLENGE' && (
+                                    <div class="space-y-6">
+                                        {activeQuestion.challenge.questions.map((q) => (
+                                            <div key={q.num} class="p-4 bg-slate-50 rounded-2xl border space-y-3">
+                                                <p class="font-extrabold text-slate-800 text-sm">{q.num}. {q.text}</p>
+                                                <div class="grid grid-cols-2 gap-2">
+                                                    {q.options.map(opt => (
+                                                        <button 
+                                                            key={opt.letter}
+                                                            onClick={() => setChallengeAnswers({ ...challengeAnswers, [q.num]: opt.letter })}
+                                                            class={`p-3 rounded-xl border text-xs font-bold text-left transition ${challengeAnswers[q.num] === opt.letter ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700'}`}
+                                                        >
+                                                            {opt.letter}. {opt.text}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+
+                                        <button 
+                                            onClick={handleChallengeSubmitAuto}
+                                            class="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-base rounded-2xl shadow-xl transition"
+                                        >
+                                            ✅ 確認提交整份評估
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* Independent Confirm Submit Button */}
+                                {!submitted && !mySubmission && activeQuestion.mode !== 'BUZZER' && activeQuestion.mode !== 'CHALLENGE' && (
+                                    <button 
+                                        onClick={() => handleSubmitResponse()}
+                                        class="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-base rounded-2xl shadow-xl transition"
+                                    >
+                                        ✅ 確認提交
+                                    </button>
+                                )}
+
+                                {/* Released Challenge Review */}
+                                {activeQuestion.mode === 'CHALLENGE' && activeQuestion.challenge?.scoresReleased && mySubmission && (
+                                    <div class="space-y-4 pt-4 border-t">
+                                        <div class="p-4 bg-indigo-50 rounded-2xl text-center space-y-1">
+                                            <span class="text-xs font-bold text-indigo-600">你的評估得分</span>
+                                            <h3 class="text-3xl font-black text-indigo-900">{mySubmission.score} 分</h3>
+                                        </div>
+
+                                        <div class="space-y-3">
+                                            {activeQuestion.challenge.questions.map(q => {
+                                                const uAns = mySubmission.challengeAnswers?.[q.num];
+                                                const isCorr = uAns === q.answer;
+
+                                                return (
+                                                    <div key={q.num} class={`p-3 rounded-xl border ${isCorr ? 'bg-emerald-50 border-emerald-300' : 'bg-red-50 border-red-300'}`}>
+                                                        <p class="font-bold text-xs">{q.num}. {q.text}</p>
+                                                        <p class="text-xs mt-1">
+                                                            你的選擇: <span class={isCorr ? 'text-emerald-700 font-bold' : 'text-red-600 font-bold'}>{uAns || '未答'}</span>
+                                                        </p>
+                                                        {!isCorr && <p class="text-xs text-emerald-700 font-bold">正確答案: {q.answer}</p>}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </main>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<OMITApp />);
+    </script>
+</body>
+</html>
+```
+
+### Summary of Modifications & Key Enhancements:
+
+1. **Whiteboard Canvas Precision Mapping (WhiteboardCanvas & Demo Board):**
+   - Implemented a standardized internal canvas resolution of `1280x720` with standard ratio mapping formulas (`scaleX = 1280 / rect.width`, `scaleY = 720 / rect.height`) to guarantee zero stroke offset across iPads, tablets, and touchscreens.
+   - Built pen stroke control (`2px` to `18px`), eraser toggle, clear canvas, background image upload, and full-screen demonstration mode with one-click teacher broadcast controls.
+
+2. **Leaderboard ("答題龍虎榜") Upgrade:**
+   - Sequential submit ordering with accurate response duration (`seconds`).
+   - Top 3 Podium Cards enlarged dynamically with Gold 🥇, Silver 🥈, Bronze 🥉 badges and glowing animations.
+   - Bar Chart visualization for Choice and TF questions with clickable options to review student lists.
+   - Individual student work inspection with Prev/Next navigation and one-click peer broadcast.
+
+3. **Cooperative Questions ("合作題") 3-Stage Engine:**
+   - **Stage 1 (預備):** Docx / Text template parser and interactive question editor.
+   - **Stage 2 (分組):** Automatic random grouping into 3–4 persons per team with distinct colors, emojis, and animal names (e.g. 🐅 老虎組, 🐘 大象組, 🐧 企鵝組). Instant broadcast of team info to students.
+   - **Stage 3 (比賽):** Real-time race progress bar on teacher console with automatic marquee fill. Student split-screen role distribution (Member 1 gets Question text, Member 2 gets Choice A/B, Member 3 gets Choice C/D). Wrong answers reset progress back to Q1. Win celebration screens with controls for restart or regroup.
+
+4. **Challenge Mode ("挑戰題") Enhancements:**
+   - Template Word download (`.docx`) and automatic parser.
+   - Flexible timer limit configuration (presets 1m–5m + manual min:sec `00:00`).
+   - Grade release modes (Instant vs. "一併發放全班挑戰題成績" batch button).
+   - Detailed student test review with green/red answer highlighting.
+   - One-click CSV export button (`📥 匯出本次挑戰題成績試算表 (.csv)`).
+
+5. **Student Workflow & Navigation:**
+   - Independent "Confirm Submit" button for all question modes.
+   - Unified feedback banner: *"已提交答案! 讚賞你的努力! 安靜等候老師指示..."*.
+   - Recording question with immediate audio playback preview and "🗑️ 刪除重錄" button.
+   - YouTube video auto-embedding and prominent "開啟連結網站 ↗" button for pushed links.
+   - Buzzer ("搶答題") sub-second locking on the absolute first respondent.
+
+6. **Branding & Header Renaming:**
+   - Landing page line 1: `宣道會陳元喜小學`, line 2: `OMIT互動課堂`.
+   - Teacher top header: `宣道會陳元喜小學OMIT互動課堂`.
+   - Customizable Random Selector (ranges 1–25, 1–36) with spin & win sound effects.
+   - Countdown Timer tool with presets, manual `00:00` input, and alarm audio.
+   - Real-time online student count badge & student seat list popup window.
